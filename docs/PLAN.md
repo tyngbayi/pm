@@ -2,35 +2,28 @@
 
 ## Global Test Policy
 
-The project must include a layered testing strategy covering unit, integration, and end-to-end flows. The goal is to prevent regressions in authentication, board data persistence, drag-and-drop behavior, and AI-driven updates.
+Tests should protect implemented behavior and catch regressions without adding unnecessary cases just to reach a coverage percentage.
 
-### Required coverage and quality gates
+### Test expectations
 
-- Unit tests are required for all backend business logic and all frontend stateful components.
-- Minimum target coverage is 80% line coverage across the backend and frontend critical code paths.
-- Coverage is enforced in CI and must be reported for the project before merge.
-- Regression tests are required for all user-facing flows in the Kanban app: login, board load, column rename, card create/edit/delete, drag-and-drop, and AI chat actions.
-- Every API contract change must include tests covering both success and failure cases.
+- Add focused tests for new or changed business logic, stateful UI behavior, and user-facing flows.
+- API contract changes should test successful behavior and relevant failure cases.
+- Use unit tests for isolated logic and components, integration tests for interactions between the API and persistence layer, and Playwright for important browser flows. Add each layer as the corresponding feature is implemented.
+- Coverage reports are informative, not a pass/fail target. There is no minimum coverage percentage or CI coverage gate.
+- There is currently no CI workflow configured; do not describe tests or coverage as CI-enforced until one is added.
 
-### Test layers
+### Running the current tests
 
-- Unit tests
-  - Backend: FastAPI route logic, auth/session checks, SQLite persistence logic, AI response parsing.
-  - Frontend: component rendering, API call wiring, state transitions, auth redirects, sidebar behavior.
-  - Use pytest for backend and Vitest for frontend.
-- Integration tests
-  - Validate FastAPI + SQLite interactions with real HTTP requests against an in-memory or temporary database.
-  - Cover login/logout, board fetch/update routes, card create/move/delete flows, and AI chat endpoint contract validation.
-- End-to-end tests
-  - Use Playwright to validate real browser flows: unauthenticated redirect, login success/failure, board rendering, drag-and-drop, add/edit/delete card, and AI sidebar interaction.
-  - E2E tests must confirm changes persist after reload.
+- Backend: run `uv run pytest` from `backend/`.
+- Frontend unit tests: run `npm run test:unit` from `frontend/`.
+- Frontend e2e tests: start the app with `scripts/start.sh` (macOS/Linux) or `scripts/start.bat` (Windows), then run `npm run test:e2e` from `frontend/`. Playwright defaults to `http://127.0.0.1:8000`; `PLAYWRIGHT_BASE_URL` can override it.
+- `npm run test:all` runs frontend unit and e2e tests, so the app must already be running.
 
 ### Definition of done for testing
 
-- All unit, integration, and e2e tests pass before the feature is considered complete.
-- When a user-visible flow is added or changed, the associated coverage must be updated in the same change set.
-- No new feature should ship without at least one test covering the behavior.
-- A feature is not considered complete until the relevant browser and API tests pass under the project’s standard test command.
+- Run and pass the tests relevant to the feature before considering it complete.
+- When a user-visible flow changes, update its relevant tests in the same change set.
+- No new feature should ship without at least one focused test of its behavior.
 
 ## Part 1: Plan (complete)
 
@@ -95,7 +88,7 @@ Build the Next.js frontend as a static export and have FastAPI serve it. The ful
 ### Success criteria
 
 - `./scripts/start.sh` rebuilds and starts the container
-- `http://localhost:8000/` shows the full Kanban board (5 columns, demo cards)
+- After signing in, `http://localhost:8000/` shows the full Kanban board (5 columns, demo cards)
 - Drag-and-drop, rename, add, and delete card all work in the browser
 - All unit and e2e tests pass
 

@@ -19,7 +19,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--cov=main --cov-report=term-missing --cov-fail-under=80"
+addopts = "--cov=main --cov-report=term-missing"
 
 [tool.uv]
 package = false

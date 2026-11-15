@@ -16,7 +16,7 @@ A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user 
 - Everything packaged into a Docker container
 - Use "uv" as the package manager for python in the Docker container
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
-- Use SQLLite local doatabase for the database, creating a new db if one does not exist
+- Use a local SQLite database, creating a new database if one does not exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
 
 ## Directory layout
@@ -87,7 +87,7 @@ The existing frontend MVP began as a pure client-side demo and was not configure
 
 ## Coding standards
 1. Use latest versions of libraries and idiomatic approaches as of today
-2. Keep it simple - NEVER over-engineer, ALWAYS simplify, NO unnecessary defensive programming. No extr features - focus on simplicity
+2. Keep it simple - NEVER over-engineer, ALWAYS simplify, NO unnecessary defensive programming. No extra features - focus on simplicity
 3. Be concise. Keep README minimal. IMPORTANT: no emojis ever.
 4. When hitting issues, always identify root cause before trying a fix. Do not guess. Prove with evidence, then fix the root cause.
 
