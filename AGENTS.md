@@ -24,7 +24,7 @@ For the MVP, this will run locally (in a docker container)
 - Everything packaged into a Docker container
 - Use "uv" as the package manager for python in the Docker container
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
-- Use `openai/gpt-oss-120b:free` as the model
+- Use `openai/gpt-oss-120b` on OpenRouter; requests may incur charges
 - Use a local SQLite database, creating a new database if one doesn't exist
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
 
@@ -36,8 +36,8 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 
 - The Next.js frontend is statically exported and served by FastAPI in Docker.
 - Fake-user sign-in is implemented with the credentials `user` / `password`.
-- SQLite persistence and authenticated board/card APIs are implemented; the frontend still uses in-memory board state until Part 7.
-- AI functionality is planned, not implemented.
+- SQLite persistence and authenticated board/card APIs are implemented; the frontend persists board state through the API.
+- The authenticated `/api/ai/ping` endpoint connects to OpenRouter using `OPENROUTER_API_KEY`; AI chat and board updates are planned.
 
 ## Color Scheme
 

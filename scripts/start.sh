@@ -14,7 +14,7 @@ if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     docker rm "$CONTAINER_NAME"
 fi
 
-docker run --detach --name "$CONTAINER_NAME" --publish 127.0.0.1:8000:8000 --volume pm-data:/app/data "$IMAGE_NAME"
+docker run --detach --name "$CONTAINER_NAME" --env-file "$ROOT_DIR/.env" --publish 127.0.0.1:8000:8000 --volume pm-data:/app/data "$IMAGE_NAME"
 
 for attempt in {1..30}; do
     if curl --fail --silent http://127.0.0.1:8000/api/health >/dev/null; then

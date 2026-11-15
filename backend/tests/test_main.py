@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from ai import OpenRouterConfigurationError
 from main import create_app
 
 
@@ -141,6 +142,7 @@ def test_board_is_protected_and_seeded_for_authenticated_user(client):
     [
         ("get", "/api/board", None),
         ("put", "/api/board", {"columns": [], "cards": {}}),
+        ("post", "/api/ai/ping", None),
         ("patch", "/api/columns/column-id", {"title": "New title"}),
         ("post", "/api/cards", {"column_id": "column-id", "title": "New card"}),
         ("patch", "/api/cards/card-id", {"title": "New title"}),
@@ -152,11 +154,42 @@ def test_board_is_protected_and_seeded_for_authenticated_user(client):
         ),
     ],
 )
-def test_board_and_card_routes_require_sign_in(client, method, path, body):
+def test_protected_routes_require_sign_in(client, method, path, body):
     request = getattr(client, method)
     response = request(path, json=body) if body is not None else request(path)
 
     assert response.status_code == 401
+
+
+def test_ai_ping_returns_non_empty_response(client, monkeypatch):
+    sign_in(client)
+
+    def respond(message):
+        assert message == "What is 2+2?"
+        return "4"
+
+    monkeypatch.setattr("main.ask_openrouter", respond)
+
+    response = client.post("/api/ai/ping")
+
+    assert response.status_code == 200
+    assert response.json() == {"response": "4"}
+
+
+def test_ai_ping_reports_missing_openrouter_configuration(client, monkeypatch):
+    sign_in(client)
+
+    def fail(_):
+        raise OpenRouterConfigurationError("OPENROUTER_API_KEY is not configured")
+
+    monkeypatch.setattr("main.ask_openrouter", fail)
+
+    response = client.post("/api/ai/ping")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "OPENROUTER_API_KEY is not configured"
+    }
 
 
 def test_put_board_replaces_cards_and_rejects_broken_references(client):

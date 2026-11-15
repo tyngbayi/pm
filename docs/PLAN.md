@@ -206,18 +206,18 @@ Wire up the backend to OpenRouter and verify a live AI call works.
 
 ### Steps
 
-- [ ] Add `openai` or `httpx` client to backend dependencies
-- [ ] Read `OPENROUTER_API_KEY` from environment (already in `.env`)
-- [ ] Create `backend/ai.py` — a thin wrapper around the OpenRouter API using model `openai/gpt-oss-120b:free`
-- [ ] Add `POST /api/ai/ping` test endpoint — sends the message `"What is 2+2?"` to the AI and returns the raw response
-- [ ] Write a backend test that calls `/api/ai/ping` and asserts a non-empty response is returned
-- [ ] Pass `OPENROUTER_API_KEY` into the Docker container via the start scripts (read from `.env`)
+- [x] Add `openai` or `httpx` client to backend dependencies
+- [x] Read `OPENROUTER_API_KEY` from environment (already in `.env`)
+- [x] Create `backend/ai.py` — a thin wrapper around OpenRouter using model `openai/gpt-oss-120b`
+- [x] Add `POST /api/ai/ping` test endpoint — sends the message `"What is 2+2?"` to the AI and returns the raw response
+- [x] Write a backend test that calls `/api/ai/ping` and asserts a non-empty response is returned
+- [x] Pass `OPENROUTER_API_KEY` into the Docker container via the start scripts (read from `.env`)
 
 ### Success criteria
 
-- `POST /api/ai/ping` returns a non-empty response from the AI
-- The response contains the correct answer (`4`) or equivalent
-- The API key is not hardcoded anywhere in source
+- [x] `POST /api/ai/ping` returns a non-empty response from the AI
+- [x] The response contains the correct answer (`4`) or equivalent
+- [x] The API key is not hardcoded anywhere in source
 
 ---
 

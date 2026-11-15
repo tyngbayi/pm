@@ -7,12 +7,18 @@ from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from openai import APIError
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 from starlette.types import Scope
 
+from ai import (
+    OpenRouterConfigurationError,
+    OpenRouterResponseError,
+    ask_openrouter,
+)
 from database import (
     BoardRecord,
     create_card,
@@ -158,6 +164,18 @@ def create_app(
     @app.get("/api/auth/me")
     def current_user(username: str = Depends(require_user)) -> dict[str, str]:
         return {"username": username}
+
+    @app.post("/api/ai/ping")
+    def ai_ping(_: str = Depends(require_user)) -> dict[str, str]:
+        try:
+            response = ask_openrouter("What is 2+2?")
+        except OpenRouterConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (APIError, OpenRouterResponseError) as exc:
+            raise HTTPException(
+                status_code=502, detail="OpenRouter request failed"
+            ) from exc
+        return {"response": response}
 
     def require_database_user(username: str = Depends(require_user)) -> str:
         user_id = get_user_id(db_path, username)
