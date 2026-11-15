@@ -180,23 +180,23 @@ Replace the in-memory Kanban state with live API calls. The board should persist
 
 ### Steps
 
-- [ ] Create `src/lib/api.ts` — typed fetch wrappers for all backend routes
-- [ ] Update `KanbanBoard.tsx`
-  - [ ] On mount, `GET /api/board` to load initial state (replace `initialData`)
-  - [ ] On every board mutation (drag, rename, add, delete), call the appropriate API endpoint
-  - [ ] Show a loading state while the initial fetch is in flight
-  - [ ] Show a toast / inline error if an API call fails
-- [ ] Remove `initialData` as the default state source (it can remain as a fallback seed for the backend only)
-- [ ] Tests
-  - [ ] Unit tests: mock fetch, test that each user action triggers the correct API call
-  - [ ] Playwright e2e: add a card, reload the page, confirm the card is still there; move a card, reload, confirm new position
+- [x] Create `src/lib/api.ts` — typed fetch wrappers for all backend routes
+- [x] Update `KanbanBoard.tsx`
+  - [x] On mount, `GET /api/board` to load initial state (replace `initialData`)
+  - [x] On every board mutation (drag, rename, add, delete), call the appropriate API endpoint
+  - [x] Show a loading state while the initial fetch is in flight
+  - [x] Show a toast / inline error if an API call fails
+- [x] Remove `initialData` as the default state source (it can remain as a fallback seed for the backend only)
+- [x] Tests
+  - [x] Unit tests: mock fetch, test API calls and component mutation behavior
+  - [x] Playwright e2e: add a card, reload the page, confirm the card is still there; move a card, reload, confirm new position
 
 ### Success criteria
 
-- Board state loads from the backend on page load
-- All mutations (drag, rename, add, delete) are persisted immediately
-- Refreshing the browser shows the same board state
-- All unit and e2e tests pass
+- [x] Board state loads from the backend on page load
+- [x] All mutations (drag, rename, add, delete) are persisted immediately
+- [x] Refreshing the browser shows the same board state
+- [x] All unit and e2e tests pass
 
 ---
 
@@ -278,3 +278,16 @@ Add a sidebar to the frontend for full AI chat. If the AI returns a `board_updat
 - Sending a message shows the AI reply in the conversation history
 - A board-modifying instruction (e.g. "Add a card called X to Backlog") updates the board without a manual refresh
 - All unit and e2e tests pass
+
+
+## Part 11
+- make the login multi-user
+
+## Part 12
+- code review agent to clean up the tree
+
+## Part 13
+- change db to use supabase
+
+## Part 14
+- deploy on vercel

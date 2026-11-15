@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { ApiError, login } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,23 +17,14 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (response.status === 401) {
-        setError("Invalid username or password.");
-        return;
-      }
-      if (!response.ok) {
-        throw new Error(`Sign-in failed (${response.status}).`);
-      }
-
+      await login(username, password);
       router.replace("/");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to sign in.");
+      if (error instanceof ApiError && error.status === 401) {
+        setError("Invalid username or password.");
+      } else {
+        setError(error instanceof Error ? error.message : "Unable to sign in.");
+      }
     } finally {
       setIsSubmitting(false);
     }

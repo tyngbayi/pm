@@ -21,7 +21,9 @@ describe("AuthGuard", () => {
   });
 
   it("renders children after confirming the session", async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ username: "user" }), { status: 200 })
+    );
 
     render(
       <AuthGuard>
@@ -30,7 +32,10 @@ describe("AuthGuard", () => {
     );
 
     expect(await screen.findByText("Board content")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/auth/me");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/me",
+      expect.objectContaining({ method: "GET" })
+    );
   });
 
   it("redirects to login when the session is missing", async () => {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { ApiError, getCurrentUser } from "@/lib/api";
 
 type AuthGuardProps = {
   children: ReactNode;
@@ -17,21 +18,22 @@ export const AuthGuard = ({ children }: AuthGuardProps) => {
 
     const checkSession = async () => {
       try {
-        const response = await fetch("/api/auth/me");
-        if (response.status === 401) {
-          router.replace("/login");
-          return;
-        }
-        if (!response.ok) {
-          throw new Error(`Session check failed (${response.status}).`);
-        }
+        await getCurrentUser();
         if (active) {
           setIsAuthenticated(true);
         }
       } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          if (active) {
+            router.replace("/login");
+          }
+          return;
+        }
         if (active) {
           setError(
-            error instanceof Error ? error.message : "Unable to verify sign-in."
+            error instanceof Error
+              ? error.message
+              : "Unable to verify sign-in."
           );
         }
       }

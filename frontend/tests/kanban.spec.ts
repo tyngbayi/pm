@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import type { BoardData } from "../src/lib/kanban";
 
 const signIn = async (page: Page) => {
   await page.goto("/login");
@@ -35,8 +36,24 @@ test("signs in and logs out", async ({ page }) => {
 });
 
 test.describe("authenticated board", () => {
+  let originalBoard: BoardData | null = null;
+
   test.beforeEach(async ({ page }) => {
+    originalBoard = null;
     await signIn(page);
+    const response = await page.request.get("/api/board");
+    expect(response.ok()).toBeTruthy();
+    originalBoard = (await response.json()) as BoardData;
+  });
+
+  test.afterEach(async ({ page }) => {
+    if (originalBoard) {
+      const response = await page.request.put("/api/board", {
+        data: originalBoard,
+      });
+      expect(response.ok()).toBeTruthy();
+      originalBoard = null;
+    }
   });
 
   test("loads the kanban board", async ({ page }) => {
@@ -45,11 +62,14 @@ test.describe("authenticated board", () => {
 
   test("adds a card to a column", async ({ page }) => {
     const firstColumn = page.locator('[data-testid^="column-"]').first();
+    const title = `Playwright card ${Date.now()}`;
     await firstColumn.getByRole("button", { name: /add a card/i }).click();
-    await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
+    await firstColumn.getByPlaceholder("Card title").fill(title);
     await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
     await firstColumn.getByRole("button", { name: /add card/i }).click();
-    await expect(firstColumn.getByText("Playwright card")).toBeVisible();
+    await expect(firstColumn.getByText(title)).toBeVisible();
+    await page.reload();
+    await expect(page.getByText(title)).toBeVisible();
   });
 
   test("renames a column", async ({ page }) => {
@@ -57,21 +77,41 @@ test.describe("authenticated board", () => {
     const title = firstColumn.getByRole("textbox", { name: "Column title" });
 
     await title.fill("Renamed column");
+    await title.press("Enter");
 
     await expect(title).toHaveValue("Renamed column");
+    await page.reload();
+    await expect(
+      page
+        .locator('[data-testid^="column-"]')
+        .first()
+        .getByRole("textbox", { name: "Column title" })
+    ).toHaveValue("Renamed column");
   });
 
   test("deletes a card", async ({ page }) => {
-    const card = page.getByTestId("card-card-1");
+    const firstCard = page.locator('[data-testid^="card-"]').first();
+    const cardId = await firstCard.getAttribute("data-testid");
+    if (!cardId) {
+      throw new Error("Unable to identify a card to delete.");
+    }
+    const card = page.getByTestId(cardId);
 
     await card.getByRole("button", { name: /^delete /i }).click();
 
     await expect(card).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId(cardId)).toHaveCount(0);
   });
 
   test("moves a card between columns", async ({ page }) => {
-    const card = page.getByTestId("card-card-1");
-    const targetColumn = page.getByTestId("column-col-review");
+    const sourceColumn = page.locator('[data-testid^="column-"]').first();
+    const card = sourceColumn.locator('[data-testid^="card-"]').first();
+    const cardId = await card.getAttribute("data-testid");
+    const targetColumn = page.locator('[data-testid^="column-"]').nth(3);
+    if (!cardId) {
+      throw new Error("Unable to identify a card to move.");
+    }
     const cardBox = await card.boundingBox();
     const columnBox = await targetColumn.boundingBox();
     if (!cardBox || !columnBox) {
@@ -89,6 +129,13 @@ test.describe("authenticated board", () => {
       { steps: 12 }
     );
     await page.mouse.up();
-    await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+    await expect(targetColumn.getByTestId(cardId)).toBeVisible();
+    await page.reload();
+    await expect(
+      page
+        .locator('[data-testid^="column-"]')
+        .nth(3)
+        .getByTestId(cardId)
+    ).toBeVisible();
   });
 });

@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Card, Column } from "@/lib/kanban";
@@ -8,19 +9,42 @@ import { NewCardForm } from "@/components/NewCardForm";
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
-  onRename: (columnId: string, title: string) => void;
-  onAddCard: (columnId: string, title: string, details: string) => void;
-  onDeleteCard: (columnId: string, cardId: string) => void;
+  disabled: boolean;
+  onRename: (columnId: string, title: string) => Promise<boolean>;
+  onAddCard: (
+    columnId: string,
+    title: string,
+    details: string
+  ) => Promise<boolean>;
+  onDeleteCard: (columnId: string, cardId: string) => Promise<boolean>;
 };
 
 export const KanbanColumn = ({
   column,
   cards,
+  disabled,
   onRename,
   onAddCard,
   onDeleteCard,
 }: KanbanColumnProps) => {
+  const [titleDraft, setTitleDraft] = useState({
+    base: column.title,
+    value: column.title,
+  });
+  const currentTitleDraft =
+    titleDraft.base === column.title ? titleDraft.value : column.title;
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
+
+  const saveTitle = async () => {
+    const title = currentTitleDraft.trim();
+    if (!title || title === column.title) {
+      setTitleDraft({ base: column.title, value: column.title });
+      return;
+    }
+    if (!(await onRename(column.id, title))) {
+      setTitleDraft({ base: column.title, value: column.title });
+    }
+  };
 
   return (
     <section
@@ -40,8 +64,18 @@ export const KanbanColumn = ({
             </span>
           </div>
           <input
-            value={column.title}
-            onChange={(event) => onRename(column.id, event.target.value)}
+            value={currentTitleDraft}
+            disabled={disabled}
+            onChange={(event) =>
+              setTitleDraft({ base: column.title, value: event.target.value })
+            }
+            onBlur={() => void saveTitle()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
             className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
             aria-label="Column title"
           />
@@ -53,6 +87,7 @@ export const KanbanColumn = ({
             <KanbanCard
               key={card.id}
               card={card}
+              disabled={disabled}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />
           ))}
@@ -64,6 +99,7 @@ export const KanbanColumn = ({
         )}
       </div>
       <NewCardForm
+        disabled={disabled}
         onAdd={(title, details) => onAddCard(column.id, title, details)}
       />
     </section>

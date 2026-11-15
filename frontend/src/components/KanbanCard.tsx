@@ -5,12 +5,13 @@ import type { Card } from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
-  onDelete: (cardId: string) => void;
+  disabled: boolean;
+  onDelete: (cardId: string) => Promise<boolean>;
 };
 
-export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
+export const KanbanCard = ({ card, disabled, onDelete }: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: card.id });
+    useSortable({ id: card.id, disabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -41,7 +42,8 @@ export const KanbanCard = ({ card, onDelete }: KanbanCardProps) => {
         </div>
         <button
           type="button"
-          onClick={() => onDelete(card.id)}
+          onClick={() => void onDelete(card.id)}
+          disabled={disabled}
           className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
           aria-label={`Delete ${card.title}`}
         >

@@ -1,6 +1,6 @@
 # Frontend
 
-A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login. The UI still keeps board state in memory; the backend persistence API is not wired into the UI yet, and AI is not implemented.
+A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login and loads/persists board state through the FastAPI backend. AI is not implemented yet.
 
 ## Tech stack
 
@@ -29,7 +29,7 @@ src/
     login/page.tsx    # Fake username/password login form
     globals.css       # CSS custom properties (color palette, surfaces, shadow)
   components/
-    KanbanBoard.tsx   # Top-level board; owns all state; DndContext provider
+    KanbanBoard.tsx   # Loads and persists board state; owns state; DndContext provider
     KanbanColumn.tsx  # Single column; droppable target; renders cards + NewCardForm
     KanbanCard.tsx    # Single card; sortable drag handle; Remove button
     KanbanCardPreview.tsx  # Ghost card shown in DragOverlay while dragging
@@ -38,8 +38,10 @@ src/
     AuthGuard.test.tsx    # Auth guard unit tests
     KanbanBoard.test.tsx  # Component unit tests
   lib/
-    kanban.ts         # Types (Card, Column, BoardData), initialData seed, moveCard logic, createId
-    kanban.test.ts    # Unit tests for moveCard and createId
+    api.ts            # Typed fetch wrappers for the backend API
+    api.test.ts       # API request and error handling tests
+    kanban.ts         # Types (Card, Column, BoardData) and moveCard logic
+    kanban.test.ts    # Unit tests for moveCard logic
   test/
     setup.ts          # Vitest global setup (@testing-library/jest-dom matchers)
     vitest.d.ts       # Type augmentation for jest-dom matchers
@@ -55,14 +57,15 @@ type Column = { id: string; title: string; cardIds: string[] }
 type BoardData = { columns: Column[]; cards: Record<string, Card> }
 ```
 
-`initialData` seeds 5 columns (Backlog, Discovery, In Progress, Review, Done) with 8 demo cards.
+The backend seeds the initial board; the frontend loads persisted board data from the API.
 
 ## Key behaviors
 
-- **Rename column**: inline `<input>` directly edits `column.title` via `onRename` callback.
+- **Rename column**: inline `<input>` saves the new title on Enter or blur.
 - **Drag card**: @dnd-kit moves cards within or across columns; drop target highlights in accent yellow.
-- **Add card**: `NewCardForm` collects title (required) + details, calls `onAddCard`; new id via `createId`.
-- **Delete card**: "Remove" button on each card calls `onDeleteCard`.
+- **Add card**: `NewCardForm` collects title (required) + details and sends them to the backend.
+- **Delete card**: "Remove" button on each card deletes it through the backend.
+- **Persistence**: the board loads on page entry; successful add, rename, delete, and move operations persist across reloads. Loading and API errors are shown inline.
 
 ## Color palette (CSS custom properties)
 
@@ -74,16 +77,12 @@ type BoardData = { columns: Column[]; cards: Record<string, Card> }
 | `--navy-dark`         | `#032147` | Headings, body text            |
 | `--gray-text`         | `#888888` | Supporting text, labels        |
 
-## Starting Point
-
-The existing frontend MVP began as a pure client-side demo and was not configured for static export or Docker.
-
-## Final state (target)
+## Current state
 
 - **Static export**: built with `next build` (`output: "export"`), `out/` served by FastAPI
 - **Auth**: implemented `/login` page and board guard; calls `POST /api/auth/login` with hardcoded credentials (`user` / `password`); session is a signed cookie; logout clears it and returns to `/login`
 - **Persistent board**: on mount the board fetches `GET /api/board`; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
-- **AI sidebar**: a panel that slides in from the right without obscuring the board; full conversation history; submits `POST /api/ai/chat` with the current board JSON + message history; if the response includes a `board_update`, the board refreshes automatically without a manual reload
+- **AI**: not implemented yet; see [Part 8](../docs/PLAN.md#part-8-ai-connectivity) onward in the project plan
 
 ## Coding standards
 1. Use latest versions of libraries and idiomatic approaches as of today
