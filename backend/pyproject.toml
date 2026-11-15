@@ -1,0 +1,24 @@
+[project]
+name = "pm-backend"
+version = "0.1.0"
+description = "FastAPI backend for the project management app"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest",
+    "pytest-cov",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--cov=main --cov-report=term-missing --cov-fail-under=80"
+
+[tool.uv]
+package = false

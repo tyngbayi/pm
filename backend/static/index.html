@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project Management App</title>
+  </head>
+  <body>
+    <main>
+      <h1>Hello, world!</h1>
+      <p>API health: <span id="health-status">Checking...</span></p>
+    </main>
+    <script>
+      const healthStatus = document.querySelector("#health-status");
+
+      fetch("/api/health")
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Health check failed: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then((data) => {
+          healthStatus.textContent = JSON.stringify(data);
+        })
+        .catch((error) => {
+          healthStatus.textContent = error.message;
+        });
+    </script>
+  </body>
+</html>

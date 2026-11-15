@@ -48,21 +48,21 @@ Set up Docker infrastructure, FastAPI backend serving static HTML, and start/sto
 
 ### Steps
 
-- [ ] Create `backend/` Python project structure using `uv`
-  - [ ] `backend/pyproject.toml` — FastAPI + uvicorn dependencies
-  - [ ] `backend/main.py` — FastAPI app with:
+- [x] Create `backend/` Python project structure using `uv`
+  - [x] `backend/pyproject.toml` — FastAPI + uvicorn dependencies
+  - [x] `backend/main.py` — FastAPI app with:
     - `GET /api/health` returning `{"status": "ok"}`
     - Static file mount serving `backend/static/` at `/`
-  - [ ] `backend/static/index.html` — minimal hello world page that calls `/api/health` and displays the result
-- [ ] Create `Dockerfile`
-  - [ ] Base image: `python:3.12-slim`
-  - [ ] Install `uv`, use it to install dependencies
-  - [ ] Copy backend source
-  - [ ] Expose port 8000; CMD runs `uvicorn`
-- [ ] Create `scripts/start.sh` (Mac/Linux) — builds image if needed, runs container on port 8000
-- [ ] Create `scripts/stop.sh` (Mac/Linux) — stops and removes container
-- [ ] Create `scripts/start.bat` (Windows) — equivalent of start.sh
-- [ ] Create `scripts/stop.bat` (Windows) — equivalent of stop.sh
+  - [x] `backend/static/index.html` — minimal hello world page that calls `/api/health` and displays the result
+- [x] Create `Dockerfile`
+  - [x] Base image: `python:3.12-slim`
+  - [x] Install `uv`, use it to install dependencies
+  - [x] Copy backend source
+  - [x] Expose port 8000; CMD runs `uvicorn`
+- [x] Create `scripts/start.sh` (Mac/Linux) — builds image if needed, runs container on port 8000
+- [x] Create `scripts/stop.sh` (Mac/Linux) — stops and removes container
+- [x] Create `scripts/start.bat` (Windows) — equivalent of start.sh
+- [x] Create `scripts/stop.bat` (Windows) — equivalent of stop.sh
 
 ### Success criteria
 
