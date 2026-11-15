@@ -129,19 +129,19 @@ Design the SQLite schema for the Kanban, document it, and get user approval befo
 
 ### Steps
 
-- [ ] Draft `docs/DATABASE.md` with:
-  - [ ] Entity descriptions: users, boards, columns, cards
-  - [ ] Full SQL schema (CREATE TABLE statements)
-  - [ ] Notes on relationships and constraints
-  - [ ] JSON representation matching the existing frontend `BoardData` type
-- [ ] Present `docs/DATABASE.md` to the user for review
-- [ ] Incorporate any feedback and get explicit user sign-off
+- [x] Draft `docs/DATABASE.md` with:
+  - [x] Entity descriptions: users, boards, columns, cards
+  - [x] Full SQL schema (CREATE TABLE statements)
+  - [x] Notes on relationships and constraints
+  - [x] JSON representation matching the existing frontend `BoardData` type
+- [x] Present `docs/DATABASE.md` to the user for review
+- [x] Incorporate any feedback and get explicit user sign-off
 
 ### Success criteria
 
-- `docs/DATABASE.md` exists and covers all entities
-- User has reviewed and approved the schema
-- No code changes yet
+- [x] `docs/DATABASE.md` exists and covers all entities
+- [x] User has reviewed and approved the schema
+- [x] No code changes yet at schema approval
 
 ---
 
