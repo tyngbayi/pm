@@ -1,6 +1,6 @@
 # Frontend
 
-A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login, but board state remains in memory and there is no persistence or AI yet.
+A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login. The UI still keeps board state in memory; the backend persistence API is not wired into the UI yet, and AI is not implemented.
 
 ## Tech stack
 

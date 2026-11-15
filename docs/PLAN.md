@@ -151,26 +151,26 @@ Implement all CRUD routes for boards, columns, and cards. Database is created au
 
 ### Steps
 
-- [ ] Add SQLite setup to FastAPI startup
-  - [ ] On startup, create the database file (path from env var, default `data/kanban.db`) and run `CREATE TABLE IF NOT EXISTS` migrations
-  - [ ] Seed the hardcoded `user` account if it does not exist
-- [ ] Implement API routes
-  - [ ] `GET /api/board` — return the authenticated user's board (columns + cards) as JSON
-  - [ ] `PUT /api/board` — replace the entire board state for the authenticated user
-  - [ ] `PATCH /api/columns/{column_id}` — rename a column
-  - [ ] `POST /api/cards` — create a card in a given column
-  - [ ] `PATCH /api/cards/{card_id}` — update card title/details
-  - [ ] `DELETE /api/cards/{card_id}` — delete a card
-  - [ ] `PATCH /api/cards/{card_id}/move` — move card to a different column / position
-- [ ] Write backend unit tests for every route (success + error cases)
-- [ ] Mount a persistent Docker volume for `data/` so the database survives container restarts
+- [x] Add SQLite setup to FastAPI startup
+  - [x] On startup, create the database file (path from env var, default `data/kanban.db`) and run `CREATE TABLE IF NOT EXISTS` migrations
+  - [x] Seed the hardcoded `user` account, its board, and the five columns/eight cards from the frontend seed if they do not exist
+- [x] Implement API routes
+  - [x] `GET /api/board` — return the authenticated user's board (columns + cards) as JSON
+  - [x] `PUT /api/board` — replace the entire board state for the authenticated user
+  - [x] `PATCH /api/columns/{column_id}` — rename a column
+  - [x] `POST /api/cards` — create a card in a given column
+  - [x] `PATCH /api/cards/{card_id}` — update card title/details
+  - [x] `DELETE /api/cards/{card_id}` — delete a card
+  - [x] `PATCH /api/cards/{card_id}/move` — move card to a different column / position
+- [x] Write backend unit tests for every route (success + error cases)
+- [x] Mount a persistent Docker volume for `data/` so the database survives container restarts
 
 ### Success criteria
 
-- All API routes return correct responses and status codes
-- Database file is created automatically if absent
-- Board state persists across container restarts (volume mounted)
-- All backend unit tests pass
+- [x] All API routes return correct responses and status codes
+- [x] Database file is created automatically if absent
+- [x] Board state persists across container restarts (volume mounted)
+- [x] All backend unit tests pass
 
 ---
 

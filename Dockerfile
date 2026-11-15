@@ -20,10 +20,11 @@ RUN pip install --no-cache-dir uv
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev
 
-COPY backend/main.py ./
+COPY backend/main.py backend/database.py ./
 COPY --from=frontend-build /app/frontend/out ./static
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV DATABASE_PATH="/app/data/kanban.db" \
+    PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 

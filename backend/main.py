@@ -1,14 +1,30 @@
 import os
 import secrets
+import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
 from starlette.types import Scope
+
+from database import (
+    BoardRecord,
+    create_card,
+    delete_card,
+    get_board,
+    get_user_id,
+    initialize_database,
+    move_card,
+    rename_column,
+    replace_board,
+    update_card,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 DEMO_USERNAME = "user"
@@ -19,6 +35,43 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_urlsafe(32)
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class CardData(BaseModel):
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    details: str
+
+
+class ColumnData(BaseModel):
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    cardIds: list[str]
+
+
+class BoardData(BaseModel):
+    columns: list[ColumnData]
+    cards: dict[str, CardData]
+
+
+class RenameColumnRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class CreateCardRequest(BaseModel):
+    column_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    details: str = ""
+
+
+class UpdateCardRequest(BaseModel):
+    title: str | None = None
+    details: str | None = None
+
+
+class MoveCardRequest(BaseModel):
+    column_id: str = Field(min_length=1)
+    position: int = Field(ge=0)
 
 
 class ExportStaticFiles(StaticFiles):
@@ -63,8 +116,18 @@ def require_user(request: Request) -> str:
 def create_app(
     static_dir: Path = STATIC_DIR,
     session_secret: str = SESSION_SECRET,
+    database_path: Path | None = None,
 ) -> FastAPI:
-    app = FastAPI()
+    db_path = database_path or Path(
+        os.environ.get("DATABASE_PATH", "data/kanban.db")
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        initialize_database(db_path)
+        yield
+
+    app = FastAPI(lifespan=lifespan)
     app.add_middleware(
         SessionMiddleware,
         secret_key=session_secret,
@@ -95,6 +158,136 @@ def create_app(
     @app.get("/api/auth/me")
     def current_user(username: str = Depends(require_user)) -> dict[str, str]:
         return {"username": username}
+
+    def require_database_user(username: str = Depends(require_user)) -> str:
+        user_id = get_user_id(db_path, username)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return user_id
+
+    @app.get("/api/board", response_model=BoardData)
+    def read_board(user_id: str = Depends(require_database_user)) -> BoardRecord:
+        board = get_board(db_path, user_id)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return board
+
+    @app.put("/api/board", response_model=BoardData)
+    def write_board(
+        board: BoardData, user_id: str = Depends(require_database_user)
+    ) -> BoardRecord:
+        column_ids = [column.id for column in board.columns]
+        card_references = [
+            card_id for column in board.columns for card_id in column.cardIds
+        ]
+        if (
+            len(column_ids) != len(set(column_ids))
+            or len(card_references) != len(set(card_references))
+            or set(card_references) != set(board.cards)
+            or any(card_id != card.id for card_id, card in board.cards.items())
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Board columns and cards must reference each other exactly once",
+            )
+
+        current_board = get_board(db_path, user_id)
+        if current_board is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        current_column_ids = [column["id"] for column in current_board["columns"]]
+        if column_ids != current_column_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Board columns cannot be added, removed, or reordered",
+            )
+
+        try:
+            updated = replace_board(db_path, user_id, board.model_dump())
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=409, detail="Board data conflicts with existing records"
+            ) from exc
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return updated
+
+    @app.patch("/api/columns/{column_id}")
+    def patch_column(
+        column_id: str,
+        payload: RenameColumnRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> dict[str, str]:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="Column title cannot be empty")
+        if not rename_column(db_path, user_id, column_id, title):
+            raise HTTPException(status_code=404, detail="Column not found")
+        return {"id": column_id, "title": title}
+
+    @app.post("/api/cards", response_model=CardData, status_code=201)
+    def post_card(
+        payload: CreateCardRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> dict[str, str]:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="Card title cannot be empty")
+        card = create_card(
+            db_path, user_id, payload.column_id, title, payload.details
+        )
+        if card is None:
+            raise HTTPException(status_code=404, detail="Column not found")
+        return card
+
+    @app.patch("/api/cards/{card_id}", response_model=CardData)
+    def patch_card(
+        card_id: str,
+        payload: UpdateCardRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> dict[str, str]:
+        changes = payload.model_dump(exclude_unset=True)
+        if not changes or any(value is None for value in changes.values()):
+            raise HTTPException(
+                status_code=422, detail="Provide a title or details to update"
+            )
+        if "title" in changes:
+            changes["title"] = changes["title"].strip()
+            if not changes["title"]:
+                raise HTTPException(
+                    status_code=422, detail="Card title cannot be empty"
+                )
+        card = update_card(db_path, user_id, card_id, changes)
+        if card is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return card
+
+    @app.delete("/api/cards/{card_id}", status_code=204)
+    def remove_card(
+        card_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> Response:
+        if not delete_card(db_path, user_id, card_id):
+            raise HTTPException(status_code=404, detail="Card not found")
+        return Response(status_code=204)
+
+    @app.patch("/api/cards/{card_id}/move", response_model=BoardData)
+    def patch_card_move(
+        card_id: str,
+        payload: MoveCardRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        board = move_card(
+            db_path,
+            user_id,
+            card_id,
+            payload.column_id,
+            payload.position,
+        )
+        if board is None:
+            raise HTTPException(
+                status_code=404, detail="Card or destination column not found"
+            )
+        return board
 
     app.mount(
         "/",

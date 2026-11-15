@@ -36,7 +36,8 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 
 - The Next.js frontend is statically exported and served by FastAPI in Docker.
 - Fake-user sign-in is implemented with the credentials `user` / `password`.
-- Board state is still in memory; SQLite persistence and AI functionality are planned, not implemented.
+- SQLite persistence and authenticated board/card APIs are implemented; the frontend still uses in-memory board state until Part 7.
+- AI functionality is planned, not implemented.
 
 ## Color Scheme
 

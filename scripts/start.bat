@@ -20,7 +20,7 @@ if not errorlevel 1 (
     if errorlevel 1 exit /b !errorlevel!
 )
 
-docker run --detach --name "%CONTAINER_NAME%" --publish 127.0.0.1:8000:8000 "%IMAGE_NAME%"
+docker run --detach --name "%CONTAINER_NAME%" --publish 127.0.0.1:8000:8000 --volume pm-data:/app/data "%IMAGE_NAME%"
 if errorlevel 1 exit /b !errorlevel!
 
 for /l %%i in (1,1,30) do (

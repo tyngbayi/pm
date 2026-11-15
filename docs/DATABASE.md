@@ -93,4 +93,4 @@ The board API returns the existing frontend `BoardData` shape. Board and user ID
 }
 ```
 
-This draft requires user approval before database implementation begins.
+This schema was approved for implementation in Part 6.
