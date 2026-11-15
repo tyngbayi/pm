@@ -1,6 +1,6 @@
 # Frontend
 
-A Next.js 16 / React 19 Kanban app. Currently a pure client-side demo — no auth, no backend, no AI. All state lives in memory and resets on reload.
+A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login, but board state remains in memory and there is no persistence or AI yet.
 
 ## Tech stack
 
@@ -25,7 +25,8 @@ A Next.js 16 / React 19 Kanban app. Currently a pure client-side demo — no aut
 src/
   app/
     layout.tsx        # Root layout; loads display + body fonts
-    page.tsx          # Entry point — renders <KanbanBoard />
+    page.tsx          # Entry point — guards and renders <KanbanBoard />
+    login/page.tsx    # Fake username/password login form
     globals.css       # CSS custom properties (color palette, surfaces, shadow)
   components/
     KanbanBoard.tsx   # Top-level board; owns all state; DndContext provider
@@ -33,6 +34,8 @@ src/
     KanbanCard.tsx    # Single card; sortable drag handle; Remove button
     KanbanCardPreview.tsx  # Ghost card shown in DragOverlay while dragging
     NewCardForm.tsx   # Inline add-card form (toggle open/closed per column)
+    AuthGuard.tsx         # Redirects unauthenticated users to /login
+    AuthGuard.test.tsx    # Auth guard unit tests
     KanbanBoard.test.tsx  # Component unit tests
   lib/
     kanban.ts         # Types (Card, Column, BoardData), initialData seed, moveCard logic, createId
@@ -41,7 +44,7 @@ src/
     setup.ts          # Vitest global setup (@testing-library/jest-dom matchers)
     vitest.d.ts       # Type augmentation for jest-dom matchers
 tests/
-  kanban.spec.ts      # Playwright e2e tests
+  kanban.spec.ts      # Playwright auth and board e2e tests
 ```
 
 ## Data model
@@ -73,12 +76,12 @@ type BoardData = { columns: Column[]; cards: Record<string, Card> }
 
 ## Starting Point
 
-A working MVP of the frontend has been built and is already in frontend. This is not yet configured for static export or Docker. It is a pure frontend-only demo.
+The existing frontend MVP began as a pure client-side demo and was not configured for static export or Docker.
 
 ## Final state (target)
 
 - **Static export**: built with `next build` (`output: "export"`), `out/` served by FastAPI
-- **Auth**: a `/login` page guards the board; calls `POST /api/auth/login` with hardcoded credentials (`user` / `password`); session is a signed cookie; logout clears it and returns to `/login`
+- **Auth**: implemented `/login` page and board guard; calls `POST /api/auth/login` with hardcoded credentials (`user` / `password`); session is a signed cookie; logout clears it and returns to `/login`
 - **Persistent board**: on mount the board fetches `GET /api/board`; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
 - **AI sidebar**: a panel that slides in from the right without obscuring the board; full conversation history; submits `POST /api/ai/chat` with the current board JSON + message history; if the response includes a `board_update`, the board refreshes automatically without a manual reload
 

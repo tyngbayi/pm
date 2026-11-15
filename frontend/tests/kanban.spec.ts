@@ -1,41 +1,94 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-test("loads the kanban board", async ({ page }) => {
-  await page.goto("/");
+const signIn = async (page: Page) => {
+  await page.goto("/login");
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
-  await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
+};
+
+test("redirects unauthenticated visitors to the login page", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
-test("adds a card to a column", async ({ page }) => {
-  await page.goto("/");
-  const firstColumn = page.locator('[data-testid^="column-"]').first();
-  await firstColumn.getByRole("button", { name: /add a card/i }).click();
-  await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
-  await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
-  await firstColumn.getByRole("button", { name: /add card/i }).click();
-  await expect(firstColumn.getByText("Playwright card")).toBeVisible();
+test("shows an error for incorrect credentials", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("wrong");
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await expect(page.locator('p[role="alert"]')).toHaveText(
+    "Invalid username or password."
+  );
+  await expect(page).toHaveURL(/\/login$/);
 });
 
-test("moves a card between columns", async ({ page }) => {
-  await page.goto("/");
-  const card = page.getByTestId("card-card-1");
-  const targetColumn = page.getByTestId("column-col-review");
-  const cardBox = await card.boundingBox();
-  const columnBox = await targetColumn.boundingBox();
-  if (!cardBox || !columnBox) {
-    throw new Error("Unable to resolve drag coordinates.");
-  }
+test("signs in and logs out", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+});
 
-  await page.mouse.move(
-    cardBox.x + cardBox.width / 2,
-    cardBox.y + cardBox.height / 2
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    columnBox.x + columnBox.width / 2,
-    columnBox.y + 120,
-    { steps: 12 }
-  );
-  await page.mouse.up();
-  await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+test.describe("authenticated board", () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page);
+  });
+
+  test("loads the kanban board", async ({ page }) => {
+    await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
+  });
+
+  test("adds a card to a column", async ({ page }) => {
+    const firstColumn = page.locator('[data-testid^="column-"]').first();
+    await firstColumn.getByRole("button", { name: /add a card/i }).click();
+    await firstColumn.getByPlaceholder("Card title").fill("Playwright card");
+    await firstColumn.getByPlaceholder("Details").fill("Added via e2e.");
+    await firstColumn.getByRole("button", { name: /add card/i }).click();
+    await expect(firstColumn.getByText("Playwright card")).toBeVisible();
+  });
+
+  test("renames a column", async ({ page }) => {
+    const firstColumn = page.locator('[data-testid^="column-"]').first();
+    const title = firstColumn.getByRole("textbox", { name: "Column title" });
+
+    await title.fill("Renamed column");
+
+    await expect(title).toHaveValue("Renamed column");
+  });
+
+  test("deletes a card", async ({ page }) => {
+    const card = page.getByTestId("card-card-1");
+
+    await card.getByRole("button", { name: /^delete /i }).click();
+
+    await expect(card).toHaveCount(0);
+  });
+
+  test("moves a card between columns", async ({ page }) => {
+    const card = page.getByTestId("card-card-1");
+    const targetColumn = page.getByTestId("column-col-review");
+    const cardBox = await card.boundingBox();
+    const columnBox = await targetColumn.boundingBox();
+    if (!cardBox || !columnBox) {
+      throw new Error("Unable to resolve drag coordinates.");
+    }
+
+    await page.mouse.move(
+      cardBox.x + cardBox.width / 2,
+      cardBox.y + cardBox.height / 2
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      columnBox.x + columnBox.width / 2,
+      columnBox.y + 120,
+      { steps: 12 }
+    );
+    await page.mouse.up();
+    await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
+  });
 });

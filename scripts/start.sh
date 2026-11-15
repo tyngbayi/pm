@@ -5,19 +5,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_NAME="pm-app:latest"
 CONTAINER_NAME="pm-app"
 
-if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    docker build --tag "$IMAGE_NAME" "$ROOT_DIR"
-fi
+docker build --tag "$IMAGE_NAME" "$ROOT_DIR"
 
 if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     if [ "$(docker container inspect --format '{{.State.Running}}' "$CONTAINER_NAME")" = "true" ]; then
-        echo "Project Management app is already running at http://localhost:8000"
-    else
-        docker start "$CONTAINER_NAME"
+        docker stop "$CONTAINER_NAME"
     fi
-else
-    docker run --detach --name "$CONTAINER_NAME" --publish 127.0.0.1:8000:8000 "$IMAGE_NAME"
+    docker rm "$CONTAINER_NAME"
 fi
+
+docker run --detach --name "$CONTAINER_NAME" --publish 127.0.0.1:8000:8000 "$IMAGE_NAME"
 
 for attempt in {1..30}; do
     if curl --fail --silent http://127.0.0.1:8000/api/health >/dev/null; then

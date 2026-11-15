@@ -79,18 +79,18 @@ Build the Next.js frontend as a static export and have FastAPI serve it. The ful
 
 ### Steps
 
-- [ ] Configure Next.js for static export
-  - [ ] Set `output: "export"` in `next.config.ts`
-  - [ ] Verify `npm run build` produces an `out/` directory
-- [ ] Update Dockerfile
-  - [ ] Add a Node build stage: install deps, run `next build`, output to `out/`
-  - [ ] Copy `out/` into the Python stage as `backend/static/`
-  - [ ] Remove the hello world `index.html` (now replaced by Next.js output)
-- [ ] Verify FastAPI static mount still serves `index.html` as fallback for client-side routing
-- [ ] Write / update tests
-  - [ ] Unit tests: all existing Vitest tests pass (`npm run test:unit` inside `frontend/`)
-  - [ ] Playwright e2e: board renders with 5 columns; drag a card; rename a column; add a card
-- [ ] Update `scripts/start.sh` / `start.bat` to rebuild the image (Next.js output is baked in at build time)
+- [x] Configure Next.js for static export
+  - [x] Set `output: "export"` in `next.config.ts`
+  - [x] Verify `npm run build` produces an `out/` directory
+- [x] Update Dockerfile
+  - [x] Add a Node build stage: install deps, run `next build`, output to `out/`
+  - [x] Copy `out/` into the Python stage as `backend/static/`
+  - [x] Remove the hello world `index.html` (now replaced by Next.js output)
+- [x] Verify FastAPI static mount serves exported pages and falls back to `index.html` for client-side routes
+- [x] Write / update tests
+  - [x] Unit tests: all existing Vitest tests pass (`npm run test:unit` inside `frontend/`)
+  - [x] Playwright e2e: board renders with 5 columns; drag a card; rename a column; add and delete a card
+- [x] Update `scripts/start.sh` / `start.bat` to rebuild the image (Next.js output is baked in at build time)
 
 ### Success criteria
 
@@ -107,18 +107,18 @@ Gate the Kanban behind a login page. Credentials are hardcoded as `user` / `pass
 
 ### Steps
 
-- [ ] Backend: add session cookie auth
-  - [ ] `POST /api/auth/login` — accepts `{ username, password }`, sets a signed session cookie on success, returns `401` on failure
-  - [ ] `POST /api/auth/logout` — clears the session cookie
-  - [ ] `GET /api/auth/me` — returns `{ username }` if authenticated, `401` otherwise
-  - [ ] Protect API routes with a dependency that checks the session cookie
-- [ ] Frontend: add login page
-  - [ ] Create `src/app/login/page.tsx` — form with username + password fields, submit calls `POST /api/auth/login`, redirects to `/` on success, shows error on failure
-  - [ ] Add auth guard: on app load, call `GET /api/auth/me`; redirect to `/login` if unauthenticated
-  - [ ] Add logout button in the board header; calls `POST /api/auth/logout`, redirects to `/login`
-- [ ] Tests
-  - [ ] Backend unit tests: login success, login failure, logout, unauthenticated request blocked
-  - [ ] Playwright e2e: unauthenticated visit to `/` redirects to `/login`; login with wrong creds shows error; login with correct creds shows board; logout returns to `/login`
+- [x] Backend: add session cookie auth
+  - [x] `POST /api/auth/login` — accepts `{ username, password }`, sets a signed session cookie on success, returns `401` on failure
+  - [x] `POST /api/auth/logout` — clears the session cookie
+  - [x] `GET /api/auth/me` — returns `{ username }` if authenticated, `401` otherwise
+  - [x] Protect API routes with a dependency that checks the session cookie
+- [x] Frontend: add login page
+  - [x] Create `src/app/login/page.tsx` — form with username + password fields, submit calls `POST /api/auth/login`, redirects to `/` on success, shows error on failure
+  - [x] Add auth guard: on app load, call `GET /api/auth/me`; redirect to `/login` if unauthenticated
+  - [x] Add logout button in the board header; calls `POST /api/auth/logout`, redirects to `/login`
+- [x] Tests
+  - [x] Backend unit tests: login success, login failure, logout, unauthenticated request blocked
+  - [x] Playwright e2e: unauthenticated visit to `/` redirects to `/login`; login with wrong creds shows error; login with correct creds shows board; logout returns to `/login`
 
 ### Success criteria
 
