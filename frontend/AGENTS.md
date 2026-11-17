@@ -1,6 +1,6 @@
 # Frontend
 
-A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login and loads/persists board state through the FastAPI backend. AI is not implemented yet.
+A Next.js 16 / React 19 Kanban app built as a static export. It has a fake user login, persists board state through FastAPI, and includes an AI chat sidebar for board questions and updates.
 
 ## Tech stack
 
@@ -33,6 +33,7 @@ src/
     KanbanColumn.tsx  # Single column; droppable target; renders cards + NewCardForm
     KanbanCard.tsx    # Single card; sortable drag handle; Remove button
     KanbanCardPreview.tsx  # Ghost card shown in DragOverlay while dragging
+    AiSidebar.tsx     # AI conversation UI and optional board update handling
     NewCardForm.tsx   # Inline add-card form (toggle open/closed per column)
     AuthGuard.tsx         # Redirects unauthenticated users to /login
     AuthGuard.test.tsx    # Auth guard unit tests
@@ -66,6 +67,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Add card**: `NewCardForm` collects title (required) + details and sends them to the backend.
 - **Delete card**: "Remove" button on each card deletes it through the backend.
 - **Persistence**: the board loads on page entry; successful add, rename, delete, and move operations persist across reloads. Loading and API errors are shown inline.
+- **AI assistant**: the sidebar sends the conversation and current board to `/api/ai/chat`; returned board updates are saved through `PUT /api/board`.
 
 ## Color palette (CSS custom properties)
 
@@ -82,7 +84,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Static export**: built with `next build` (`output: "export"`), `out/` served by FastAPI
 - **Auth**: implemented `/login` page and board guard; calls `POST /api/auth/login` with hardcoded credentials (`user` / `password`); session is a signed cookie; logout clears it and returns to `/login`
 - **Persistent board**: on mount the board fetches `GET /api/board`; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
-- **AI**: not implemented yet; see [Part 8](../docs/PLAN.md#part-8-ai-connectivity) onward in the project plan
+- **AI chat**: authenticated sidebar conversation uses OpenRouter; structured responses can update and persist the board. Requests use the configured paid model.
 
 ## Coding standards
 1. Use latest versions of libraries and idiomatic approaches as of today

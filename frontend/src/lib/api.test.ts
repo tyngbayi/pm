@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  chatWithAi,
   createCard,
   deleteCard,
   getBoard,
@@ -86,6 +87,21 @@ describe("API client", () => {
         name: "ApiError",
         status: 404,
         message: "Not found",
+      })
+    );
+  });
+
+  it("sends the conversation and current board to AI chat", async () => {
+    const messages = [{ role: "user" as const, content: "Move this card." }];
+    const board = { columns: [], cards: {} };
+
+    await chatWithAi(messages, board);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai/chat",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ messages, board }),
       })
     );
   });

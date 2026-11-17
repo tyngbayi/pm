@@ -37,7 +37,7 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 - The Next.js frontend is statically exported and served by FastAPI in Docker.
 - Fake-user sign-in is implemented with the credentials `user` / `password`.
 - SQLite persistence and authenticated board/card APIs are implemented; the frontend persists board state through the API.
-- The authenticated `/api/ai/ping` endpoint connects to OpenRouter using `OPENROUTER_API_KEY`; AI chat and board updates are planned.
+- The authenticated AI endpoints connect to OpenRouter using `OPENROUTER_API_KEY`; the sidebar can chat about the board and persist AI-proposed board updates.
 
 ## Color Scheme
 

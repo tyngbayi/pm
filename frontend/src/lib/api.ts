@@ -14,6 +14,11 @@ type User = { username: string };
 type HealthStatus = { status: string };
 type ColumnUpdate = { id: string; title: string };
 type CardChanges = Partial<Pick<Card, "title" | "details">>;
+export type AiChatMessage = { role: "user" | "assistant"; content: string };
+export type AiChatResponse = {
+  message: string;
+  board_update: BoardData | null;
+};
 
 const getApiError = async (response: Response) => {
   let message = `Request failed (${response.status}).`;
@@ -116,4 +121,10 @@ export const moveCard = (
   requestJson<BoardData>(
     `/api/cards/${encodeURIComponent(cardId)}/move`,
     jsonRequest("PATCH", { column_id: columnId, position })
+  );
+
+export const chatWithAi = (messages: AiChatMessage[], board: BoardData) =>
+  requestJson<AiChatResponse>(
+    "/api/ai/chat",
+    jsonRequest("POST", { messages, board })
   );

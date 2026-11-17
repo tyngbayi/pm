@@ -60,6 +60,77 @@ test.describe("authenticated board", () => {
     await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
   });
 
+  test("uses the AI sidebar to move cards and persists the update", async ({
+    page,
+  }) => {
+    const boardResponse = await page.request.get("/api/board");
+    expect(boardResponse.ok()).toBeTruthy();
+    const board = (await boardResponse.json()) as BoardData;
+    const doneColumn = board.columns[board.columns.length - 1];
+    if (!doneColumn) {
+      throw new Error("Unable to identify the Done column.");
+    }
+    const updatedBoard: BoardData = {
+      columns: board.columns.map((column, index) =>
+        index < board.columns.length - 1
+          ? { ...column, cardIds: [] }
+          : {
+              ...column,
+              cardIds: [
+                ...column.cardIds,
+                ...board.columns
+                  .slice(0, -1)
+                  .flatMap((source) => source.cardIds),
+              ],
+            }
+      ),
+      cards: board.cards,
+    };
+    await page.route("**/api/ai/chat", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          message: "I moved all cards to Done.",
+          board_update: updatedBoard,
+        }),
+      })
+    );
+
+    await page.getByRole("button", { name: "AI assistant" }).click();
+    const sidebar = page.locator("#ai-sidebar");
+    await expect(sidebar.getByRole("heading", { name: "AI chat" })).toBeVisible();
+    await sidebar
+      .getByRole("textbox", { name: "Message the AI" })
+      .fill("Move all cards to Done");
+    await sidebar.getByRole("button", { name: "Send" }).click();
+
+    await expect(sidebar.getByTestId("assistant-message")).toContainText(
+      "I moved all cards to Done."
+    );
+    const cardLocator = '[data-testid^="card-"]';
+    for (const column of board.columns.slice(0, -1)) {
+      await expect(
+        page.getByTestId(`column-${column.id}`).locator(cardLocator)
+      ).toHaveCount(0);
+    }
+    await expect(
+      page
+        .getByTestId(`column-${doneColumn.id}`)
+        .locator(cardLocator)
+    ).toHaveCount(Object.keys(board.cards).length);
+    await sidebar.getByRole("button", { name: "Close AI assistant" }).click();
+    await expect(
+      page.getByRole("button", { name: "AI assistant" })
+    ).toHaveAttribute("aria-expanded", "false");
+    await page.reload();
+    await expect(
+      page
+        .getByTestId(`column-${doneColumn.id}`)
+        .locator(cardLocator)
+    ).toHaveCount(Object.keys(board.cards).length);
+  });
+
   test("adds a card to a column", async ({ page }) => {
     const firstColumn = page.locator('[data-testid^="column-"]').first();
     const title = `Playwright card ${Date.now()}`;

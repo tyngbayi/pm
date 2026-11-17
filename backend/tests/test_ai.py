@@ -33,3 +33,28 @@ def test_ask_openrouter_requires_an_api_key(monkeypatch):
 
     with pytest.raises(ai.OpenRouterConfigurationError):
         ai.ask_openrouter("What is 2+2?")
+
+
+def test_chat_with_openrouter_uses_board_context_and_json_mode(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.chat.completions.create.return_value.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='{"message":"Hello","board_update":null}'
+            )
+        )
+    ]
+    monkeypatch.setattr(ai, "OpenAI", MagicMock(return_value=client))
+    messages = [{"role": "user", "content": "Tell me about the backlog."}]
+    board = {"columns": [], "cards": {}}
+
+    response = ai.chat_with_openrouter(messages, board)
+
+    assert response == '{"message":"Hello","board_update":null}'
+    call = client.chat.completions.create.call_args.kwargs
+    assert call["model"] == "openai/gpt-oss-120b"
+    assert call["messages"][1:] == messages
+    assert '{"columns": [], "cards": {}}' in call["messages"][0]["content"]
+    assert call["response_format"] == {"type": "json_object"}

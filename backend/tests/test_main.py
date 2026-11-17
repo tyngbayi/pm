@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -143,6 +145,11 @@ def test_board_is_protected_and_seeded_for_authenticated_user(client):
         ("get", "/api/board", None),
         ("put", "/api/board", {"columns": [], "cards": {}}),
         ("post", "/api/ai/ping", None),
+        (
+            "post",
+            "/api/ai/chat",
+            {"messages": [{"role": "user", "content": "Hello"}], "board": {"columns": [], "cards": {}}},
+        ),
         ("patch", "/api/columns/column-id", {"title": "New title"}),
         ("post", "/api/cards", {"column_id": "column-id", "title": "New card"}),
         ("patch", "/api/cards/card-id", {"title": "New title"}),
@@ -190,6 +197,72 @@ def test_ai_ping_reports_missing_openrouter_configuration(client, monkeypatch):
     assert response.json() == {
         "detail": "OPENROUTER_API_KEY is not configured"
     }
+
+
+def test_ai_chat_returns_response_without_board_update(client, monkeypatch):
+    sign_in(client)
+    board = client.get("/api/board").json()
+    messages = [{"role": "user", "content": "What is in my backlog?"}]
+
+    def respond(request_messages, request_board):
+        assert request_messages == messages
+        assert request_board == board
+        return json.dumps({"message": "There are two cards.", "board_update": None})
+
+    monkeypatch.setattr("main.chat_with_openrouter", respond)
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"messages": messages, "board": board},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "There are two cards.",
+        "board_update": None,
+    }
+
+
+def test_ai_chat_returns_a_valid_board_update(client, monkeypatch):
+    sign_in(client)
+    board = client.get("/api/board").json()
+    card_id = board["columns"][0]["cardIds"][0]
+    board["cards"][card_id]["title"] = "Updated by AI"
+    response_body = {
+        "message": "I updated the card.",
+        "board_update": board,
+    }
+    monkeypatch.setattr(
+        "main.chat_with_openrouter",
+        lambda *_: json.dumps(response_body),
+    )
+
+    response = client.post(
+        "/api/ai/chat",
+        json={
+            "messages": [{"role": "user", "content": "Update this card"}],
+            "board": client.get("/api/board").json(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == response_body
+
+
+def test_ai_chat_rejects_invalid_structured_output(client, monkeypatch):
+    sign_in(client)
+    board = client.get("/api/board").json()
+    monkeypatch.setattr("main.chat_with_openrouter", lambda *_: "{invalid")
+
+    response = client.post(
+        "/api/ai/chat",
+        json={
+            "messages": [{"role": "user", "content": "Hello"}],
+            "board": board,
+        },
+    )
+
+    assert response.status_code == 502
 
 
 def test_put_board_replaces_cards_and_rejects_broken_references(client):

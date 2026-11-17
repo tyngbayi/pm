@@ -113,6 +113,59 @@ describe("KanbanBoard", () => {
     );
   });
 
+  it("shows AI chat and persists a returned board update", async () => {
+    const user = userEvent.setup();
+    const updatedBoard: BoardData = {
+      ...sampleBoard,
+      columns: sampleBoard.columns.map((column, index) =>
+        index === 0
+          ? { ...column, cardIds: ["card-2"] }
+          : index === 4
+            ? { ...column, cardIds: ["card-6", "card-1"] }
+            : column
+      ),
+    };
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(screen.getByRole("button", { name: "AI assistant" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Message the AI" }),
+      "Move this card to Done"
+    );
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ message: "I moved the card.", board_update: updatedBoard })
+      )
+      .mockResolvedValueOnce(jsonResponse(updatedBoard));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("I moved the card.")).toBeInTheDocument();
+    expect(screen.getByText("Move this card to Done")).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("column-col-done")).getByText(
+        "Align roadmap themes"
+      )
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ai/chat",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Move this card to Done" }],
+          board: sampleBoard,
+        }),
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/board",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify(updatedBoard),
+      })
+    );
+  });
+
   it("persists a renamed column when editing ends", async () => {
     const user = userEvent.setup();
     render(<KanbanBoard />);

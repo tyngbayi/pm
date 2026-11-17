@@ -227,28 +227,28 @@ Extend the AI endpoint so it accepts user messages + conversation history, recei
 
 ### Steps
 
-- [ ] Define a Pydantic response schema:
+- [x] Define a Pydantic response schema:
   ```python
   class AiResponse(BaseModel):
       message: str
       board_update: BoardData | None = None
   ```
-- [ ] Update `backend/ai.py`
-  - [ ] System prompt includes the current board JSON
-  - [ ] User turn includes conversation history + new message
-  - [ ] Use OpenRouter structured outputs / function calling to enforce `AiResponse` shape
-- [ ] Add `POST /api/ai/chat` endpoint
-  - [ ] Request body: `{ messages: [{role, content}], board: BoardData }`
-  - [ ] Response: `AiResponse`
-- [ ] Write backend tests
-  - [ ] Mock the OpenRouter call; assert the endpoint correctly parses and returns `AiResponse`
-  - [ ] Test a case with `board_update: null` and one with a non-null `board_update`
+- [x] Update `backend/ai.py`
+  - [x] System prompt includes the current board JSON
+  - [x] User turn includes conversation history + new message
+  - [x] Use JSON mode and Pydantic validation to enforce `AiResponse` shape
+- [x] Add `POST /api/ai/chat` endpoint
+  - [x] Request body: `{ messages: [{role, content}], board: BoardData }`
+  - [x] Response: `AiResponse`
+- [x] Write backend tests
+  - [x] Mock the OpenRouter call; assert the endpoint correctly parses and returns `AiResponse`
+  - [x] Test a case with `board_update: null` and one with a non-null `board_update`
 
 ### Success criteria
 
-- `POST /api/ai/chat` returns `{ message, board_update }` on every call
-- `board_update` is `null` for general questions and a valid `BoardData` object when the AI decides to update the board
-- All backend tests pass
+- [x] `POST /api/ai/chat` returns `{ message, board_update }` on every call
+- [x] `board_update` is `null` for general questions and a valid `BoardData` object when the AI decides to update the board
+- [x] All backend tests pass
 
 ---
 
@@ -258,28 +258,28 @@ Add a sidebar to the frontend for full AI chat. If the AI returns a `board_updat
 
 ### Steps
 
-- [ ] Create `src/components/AiSidebar.tsx`
-  - [ ] Toggle open/closed via a button in the board header
-  - [ ] Displays conversation history (user messages + AI messages)
-  - [ ] Text input + submit button to send a new message
-  - [ ] On submit: call `POST /api/ai/chat` with current conversation + board state
-  - [ ] Append AI response to conversation history
-  - [ ] If `board_update` is present, call `PUT /api/board` then refresh board state in `KanbanBoard`
-  - [ ] Show a loading indicator while the AI call is in flight
-- [ ] Lift board state or use a shared context so `KanbanBoard` and `AiSidebar` can share the current board and update it
-- [ ] Style the sidebar using the existing color palette; it should slide in from the right without obscuring the board
-- [ ] Tests
-  - [ ] Unit test: mock `POST /api/ai/chat`; assert message appears in history; assert board updates when `board_update` is returned
-  - [ ] Playwright e2e: open sidebar, send "Move all cards to Done", confirm board updates in the UI
+- [x] Create `src/components/AiSidebar.tsx`
+  - [x] Toggle open/closed via a button in the board header
+  - [x] Displays conversation history (user messages + AI messages)
+  - [x] Text input + submit button to send a new message
+  - [x] On submit: call `POST /api/ai/chat` with current conversation + board state
+  - [x] Append AI response to conversation history
+  - [x] If `board_update` is present, call `PUT /api/board` then refresh board state in `KanbanBoard`
+  - [x] Show a loading indicator while the AI call is in flight
+- [x] Lift board state or use a shared context so `KanbanBoard` and `AiSidebar` can share the current board and update it
+- [x] Style the sidebar using the existing color palette; it should slide in from the right without obscuring the board
+- [x] Tests
+  - [x] Unit test: mock `POST /api/ai/chat`; assert message appears in history; assert board updates when `board_update` is returned
+  - [x] Playwright e2e: open sidebar, send "Move all cards to Done", confirm board updates in the UI
 
 ### Success criteria
 
-- Sidebar opens and closes cleanly
-- Sending a message shows the AI reply in the conversation history
-- A board-modifying instruction (e.g. "Add a card called X to Backlog") updates the board without a manual refresh
-- All unit and e2e tests pass
+- [x] Sidebar opens and closes cleanly
+- [x] Sending a message shows the AI reply in the conversation history
+- [x] A board-modifying instruction (e.g. "Add a card called X to Backlog") updates the board without a manual refresh
+- [x] All unit and e2e tests pass
 
-
+## Future extension
 ## Part 11
 - make the login multi-user
 

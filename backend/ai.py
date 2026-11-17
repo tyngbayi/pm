@@ -1,3 +1,4 @@
+import json
 import os
 
 from openai import OpenAI
@@ -14,12 +15,15 @@ class OpenRouterResponseError(RuntimeError):
     pass
 
 
-def ask_openrouter(message: str) -> str:
+def _create_openrouter_client() -> OpenAI:
     api_key = os.environ.get("OPENROUTER_API_KEY")
     if not api_key:
         raise OpenRouterConfigurationError("OPENROUTER_API_KEY is not configured")
+    return OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL)
 
-    with OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL) as client:
+
+def ask_openrouter(message: str) -> str:
+    with _create_openrouter_client() as client:
         completion = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": message}],
@@ -31,4 +35,38 @@ def ask_openrouter(message: str) -> str:
     content = completion.choices[0].message.content
     if not content or not content.strip():
         raise OpenRouterResponseError("OpenRouter returned an empty response")
+    return content
+
+
+def chat_with_openrouter(
+    messages: list[dict[str, str]],
+    board: dict[str, object],
+) -> str:
+    system_prompt = (
+        "You are a project-management assistant. Return a JSON object with a "
+        "non-empty string field `message` and a `board_update` field that is "
+        "either null or a complete BoardData object. Set board_update to null "
+        "for general questions. For requested card changes, return the complete "
+        "updated board, preserving the existing column IDs and order and "
+        "preserving all cards not explicitly changed. The board data is: "
+        f"{json.dumps(board, ensure_ascii=False)}"
+    )
+    request_messages = [
+        {"role": "system", "content": system_prompt},
+        *messages,
+    ]
+
+    with _create_openrouter_client() as client:
+        completion = client.chat.completions.create(
+            model=MODEL,
+            messages=request_messages,
+            response_format={"type": "json_object"},
+        )
+
+    if not completion.choices:
+        raise OpenRouterResponseError("OpenRouter returned no response choices")
+
+    content = completion.choices[0].message.content
+    if not content:
+        raise OpenRouterResponseError("OpenRouter returned no structured response")
     return content

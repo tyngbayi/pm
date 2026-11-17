@@ -13,6 +13,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
+import { AiSidebar } from "@/components/AiSidebar";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import {
   createCard,
@@ -20,6 +21,7 @@ import {
   getBoard,
   logout,
   moveCard as moveCardApi,
+  replaceBoard,
   renameColumn,
 } from "@/lib/api";
 import { moveCard as calculateMove, type BoardData } from "@/lib/kanban";
@@ -32,6 +34,9 @@ export const KanbanBoard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
+  const [isAiBusy, setIsAiBusy] = useState(false);
+  const isBoardBusy = isSaving || isAiBusy;
 
   const loadBoard = useCallback(async () => {
     setError(null);
@@ -55,7 +60,7 @@ export const KanbanBoard = () => {
     request: () => Promise<T>,
     apply: (result: T) => void
   ): Promise<boolean> => {
-    if (isSaving) {
+    if (isBoardBusy) {
       return false;
     }
     setError(null);
@@ -80,7 +85,7 @@ export const KanbanBoard = () => {
   );
 
   const handleDragStart = (event: DragStartEvent) => {
-    if (!isSaving) {
+    if (!isBoardBusy) {
       setActiveCardId(String(event.active.id));
     }
   };
@@ -89,7 +94,7 @@ export const KanbanBoard = () => {
     const { active, over } = event;
     setActiveCardId(null);
 
-    if (!board || isSaving || !over || active.id === over.id) {
+    if (!board || isBoardBusy || !over || active.id === over.id) {
       return;
     }
 
@@ -201,6 +206,10 @@ export const KanbanBoard = () => {
     }
   };
 
+  const handleAiBoardUpdate = async (updatedBoard: BoardData) => {
+    setBoard(await replaceBoard(updatedBoard));
+  };
+
   const activeCard = activeCardId ? board?.cards[activeCardId] : null;
 
   if (isLoading) {
@@ -231,7 +240,8 @@ export const KanbanBoard = () => {
       <div className="pointer-events-none absolute left-0 top-0 h-[420px] w-[420px] -translate-x-1/3 -translate-y-1/3 rounded-full bg-[radial-gradient(circle,_rgba(32,157,215,0.25)_0%,_rgba(32,157,215,0.05)_55%,_transparent_70%)]" />
       <div className="pointer-events-none absolute bottom-0 right-0 h-[520px] w-[520px] translate-x-1/4 translate-y-1/4 rounded-full bg-[radial-gradient(circle,_rgba(117,57,145,0.18)_0%,_rgba(117,57,145,0.05)_55%,_transparent_75%)]" />
 
-      <main className="relative mx-auto flex min-h-screen max-w-[1500px] flex-col gap-10 px-6 pb-16 pt-12">
+      <div className="relative mx-auto flex min-h-screen max-w-[1900px] flex-col gap-6 px-6 pb-16 pt-12 xl:flex-row">
+        <main className="flex min-w-0 flex-1 flex-col gap-10">
         <header className="flex flex-col gap-6 rounded-[32px] border border-[var(--stroke)] bg-white/80 p-8 shadow-[var(--shadow)] backdrop-blur">
           <div className="flex flex-wrap items-start justify-between gap-6">
             <div>
@@ -255,6 +265,15 @@ export const KanbanBoard = () => {
                   One board. Five columns. Zero clutter.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => setIsAiSidebarOpen((open) => !open)}
+                aria-controls="ai-sidebar"
+                aria-expanded={isAiSidebarOpen}
+                className="rounded-full border border-[var(--primary-blue)] px-5 py-3 text-sm font-semibold text-[var(--primary-blue)] transition hover:bg-[var(--primary-blue)] hover:text-white"
+              >
+                AI assistant
+              </button>
               <button
                 type="button"
                 onClick={handleLogout}
@@ -296,7 +315,7 @@ export const KanbanBoard = () => {
                 key={column.id}
                 column={column}
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
-                disabled={isSaving}
+                disabled={isBoardBusy}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
@@ -311,7 +330,16 @@ export const KanbanBoard = () => {
             ) : null}
           </DragOverlay>
         </DndContext>
-      </main>
+        </main>
+        <AiSidebar
+          isOpen={isAiSidebarOpen}
+          isBoardSaving={isSaving}
+          board={board}
+          onClose={() => setIsAiSidebarOpen(false)}
+          onBoardUpdate={handleAiBoardUpdate}
+          onBusyChange={setIsAiBusy}
+        />
+      </div>
     </div>
   );
 };

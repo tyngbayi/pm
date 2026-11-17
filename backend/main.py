@@ -3,12 +3,12 @@ import secrets
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
@@ -18,6 +18,7 @@ from ai import (
     OpenRouterConfigurationError,
     OpenRouterResponseError,
     ask_openrouter,
+    chat_with_openrouter,
 )
 from database import (
     BoardRecord,
@@ -58,6 +59,21 @@ class ColumnData(BaseModel):
 class BoardData(BaseModel):
     columns: list[ColumnData]
     cards: dict[str, CardData]
+
+
+class AiChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class AiChatRequest(BaseModel):
+    messages: list[AiChatMessage] = Field(min_length=1)
+    board: BoardData
+
+
+class AiResponse(BaseModel):
+    message: str = Field(min_length=1)
+    board_update: BoardData | None = None
 
 
 class RenameColumnRequest(BaseModel):
@@ -176,6 +192,24 @@ def create_app(
                 status_code=502, detail="OpenRouter request failed"
             ) from exc
         return {"response": response}
+
+    @app.post("/api/ai/chat", response_model=AiResponse)
+    def ai_chat(
+        payload: AiChatRequest,
+        _: str = Depends(require_user),
+    ) -> AiResponse:
+        try:
+            response_json = chat_with_openrouter(
+                [message.model_dump() for message in payload.messages],
+                payload.board.model_dump(),
+            )
+            return AiResponse.model_validate_json(response_json)
+        except OpenRouterConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except (APIError, OpenRouterResponseError, ValidationError) as exc:
+            raise HTTPException(
+                status_code=502, detail="OpenRouter returned an invalid response"
+            ) from exc
 
     def require_database_user(username: str = Depends(require_user)) -> str:
         user_id = get_user_id(db_path, username)
