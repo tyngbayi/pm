@@ -123,8 +123,5 @@ export const moveCard = (
     jsonRequest("PATCH", { column_id: columnId, position })
   );
 
-export const chatWithAi = (messages: AiChatMessage[], board: BoardData) =>
-  requestJson<AiChatResponse>(
-    "/api/ai/chat",
-    jsonRequest("POST", { messages, board })
-  );
+export const chatWithAi = (messages: AiChatMessage[]) =>
+  requestJson<AiChatResponse>("/api/ai/chat", jsonRequest("POST", { messages }));

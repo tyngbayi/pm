@@ -91,17 +91,16 @@ describe("API client", () => {
     );
   });
 
-  it("sends the conversation and current board to AI chat", async () => {
+  it("sends only the conversation to AI chat", async () => {
     const messages = [{ role: "user" as const, content: "Move this card." }];
-    const board = { columns: [], cards: {} };
 
-    await chatWithAi(messages, board);
+    await chatWithAi(messages);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/ai/chat",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ messages, board }),
+        body: JSON.stringify({ messages }),
       })
     );
   });

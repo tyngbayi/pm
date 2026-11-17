@@ -67,7 +67,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Add card**: `NewCardForm` collects title (required) + details and sends them to the backend.
 - **Delete card**: "Remove" button on each card deletes it through the backend.
 - **Persistence**: the board loads on page entry; successful add, rename, delete, and move operations persist across reloads. Loading and API errors are shown inline.
-- **AI assistant**: the sidebar sends the conversation and current board to `/api/ai/chat`; returned board updates are saved through `PUT /api/board`.
+- **AI assistant**: the sidebar sends only the conversation to `/api/ai/chat`; the backend reads, validates, and persists the board itself, so the sidebar just renders the board it gets back.
 
 ## Color palette (CSS custom properties)
 

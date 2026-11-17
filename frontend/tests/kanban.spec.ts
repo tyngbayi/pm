@@ -60,7 +60,7 @@ test.describe("authenticated board", () => {
     await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
   });
 
-  test("uses the AI sidebar to move cards and persists the update", async ({
+  test("applies a board update returned by the AI sidebar", async ({
     page,
   }) => {
     const boardResponse = await page.request.get("/api/board");
@@ -123,12 +123,6 @@ test.describe("authenticated board", () => {
     await expect(
       page.getByRole("button", { name: "AI assistant" })
     ).toHaveAttribute("aria-expanded", "false");
-    await page.reload();
-    await expect(
-      page
-        .getByTestId(`column-${doneColumn.id}`)
-        .locator(cardLocator)
-    ).toHaveCount(Object.keys(board.cards).length);
   });
 
   test("adds a card to a column", async ({ page }) => {

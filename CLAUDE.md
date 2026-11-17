@@ -64,8 +64,13 @@ image rebuild, which is why the start scripts always rebuild.
 
 **Static serving.** `ExportStaticFiles` in `backend/main.py` subclasses `StaticFiles`
 to make the export work: on a 404 it retries `<path>.html` (extensionless exported
-pages), then falls back to `index.html` for client-side routes. Paths under `api/` or
-with a file suffix get a real 404 instead.
+pages), then serves the exported `404.html` with a real 404 status. Paths under `api/`
+or with a file suffix skip the `.html` retry. The export only contains `/`, `/login`,
+and `/404`, so there are no client-side routes to fall back to `index.html` for.
+It also sets `Cache-Control`: `no-cache` for pages and `immutable` for
+`_next/static/` assets. Pages must revalidate because chunk filenames are
+content-hashed, so a cached page would otherwise request chunks that a rebuild
+has already removed.
 
 **App construction.** `create_app(static_dir, session_secret, database_path)` in
 `backend/main.py` builds the app, so tests inject a `tmp_path` database and static
@@ -108,11 +113,17 @@ carrying the status and the FastAPI `detail` string.
 `base_url=https://openrouter.ai/api/v1` and model `openai/gpt-oss-120b` (paid calls).
 `OPENROUTER_API_KEY` comes from the environment via `.env`, which the start scripts
 pass to the container. `chat_with_openrouter` embeds the current board JSON in the
-system prompt and requests `response_format: json_object`; `POST /api/ai/chat`
-validates the reply against `AiResponse` (`message` plus optional `board_update`) and
-returns 503 when the key is missing, 502 on an invalid or failed response.
-`AiSidebar.tsx` sends the conversation plus board, and persists any `board_update`
-through `PUT /api/board` before refreshing.
+system prompt, requests `response_format: json_object`, caps the outgoing history at
+`MAX_HISTORY_MESSAGES` turns, and caps the reply at `MAX_COMPLETION_TOKENS`.
+
+`POST /api/ai/chat` is authoritative over the board: it takes only the conversation,
+reads the board from SQLite itself, validates the reply against `AiResponse`
+(`message` plus optional `board_update`), then runs any `board_update` through the
+shared `board_update_error` check and persists it before returning the saved board.
+It returns 503 when the key is missing and 502 on a failed, invalid, or
+structurally-invalid response. `AiSidebar.tsx` therefore just renders the returned
+board; it never issues a `PUT`. `board_update_error` is shared with `PUT /api/board`,
+so both paths enforce the same referential-integrity and fixed-column-set rules.
 
 ## Testing
 

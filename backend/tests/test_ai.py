@@ -58,3 +58,24 @@ def test_chat_with_openrouter_uses_board_context_and_json_mode(monkeypatch):
     assert call["messages"][1:] == messages
     assert '{"columns": [], "cards": {}}' in call["messages"][0]["content"]
     assert call["response_format"] == {"type": "json_object"}
+    assert call["max_tokens"] == ai.MAX_COMPLETION_TOKENS
+
+
+def test_chat_with_openrouter_caps_the_conversation_history(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.chat.completions.create.return_value.choices = [
+        MagicMock(message=MagicMock(content='{"message":"Hi","board_update":null}'))
+    ]
+    monkeypatch.setattr(ai, "OpenAI", MagicMock(return_value=client))
+    messages = [
+        {"role": "user", "content": f"message {index}"}
+        for index in range(ai.MAX_HISTORY_MESSAGES + 10)
+    ]
+
+    ai.chat_with_openrouter(messages, {"columns": [], "cards": {}})
+
+    sent = client.chat.completions.create.call_args.kwargs["messages"]
+    assert len(sent) == ai.MAX_HISTORY_MESSAGES + 1
+    assert sent[1:] == messages[-ai.MAX_HISTORY_MESSAGES :]

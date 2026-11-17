@@ -68,7 +68,6 @@ class AiChatMessage(BaseModel):
 
 class AiChatRequest(BaseModel):
     messages: list[AiChatMessage] = Field(min_length=1)
-    board: BoardData
 
 
 class AiResponse(BaseModel):
@@ -96,8 +95,23 @@ class MoveCardRequest(BaseModel):
     position: int = Field(ge=0)
 
 
+HASHED_ASSET_PREFIX = "_next/static/"
+
+
 class ExportStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await self._resolve_response(path, scope)
+        # Build assets carry a content hash, so they can be cached forever.
+        # Everything else must revalidate: without this a browser heuristically
+        # caches the HTML and, after a rebuild, asks for chunk hashes that no
+        # longer exist, leaving the page unable to hydrate.
+        if path.startswith(HASHED_ASSET_PREFIX):
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["cache-control"] = "no-cache"
+        return response
+
+    async def _resolve_response(self, path: str, scope: Scope) -> Response:
         try:
             response = await super().get_response(path, scope)
         except HTTPException as exc:
@@ -126,7 +140,28 @@ class ExportStaticFiles(StaticFiles):
             if response is not None and response.status_code != 404:
                 return response
 
+            not_found = await super().get_response("404.html", scope)
+            not_found.status_code = 404
+            return not_found
+
         return await super().get_response("index.html", scope)
+
+
+def board_update_error(board: BoardData, current: BoardRecord) -> str | None:
+    column_ids = [column.id for column in board.columns]
+    card_references = [
+        card_id for column in board.columns for card_id in column.cardIds
+    ]
+    if (
+        len(column_ids) != len(set(column_ids))
+        or len(card_references) != len(set(card_references))
+        or set(card_references) != set(board.cards)
+        or any(card_id != card.id for card_id, card in board.cards.items())
+    ):
+        return "Board columns and cards must reference each other exactly once"
+    if column_ids != [column["id"] for column in current["columns"]]:
+        return "Board columns cannot be added, removed, or reordered"
+    return None
 
 
 def require_user(request: Request) -> str:
@@ -193,17 +228,27 @@ def create_app(
             ) from exc
         return {"response": response}
 
+    def require_database_user(username: str = Depends(require_user)) -> str:
+        user_id = get_user_id(db_path, username)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return user_id
+
     @app.post("/api/ai/chat", response_model=AiResponse)
     def ai_chat(
         payload: AiChatRequest,
-        _: str = Depends(require_user),
+        user_id: str = Depends(require_database_user),
     ) -> AiResponse:
+        board = get_board(db_path, user_id)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+
         try:
             response_json = chat_with_openrouter(
                 [message.model_dump() for message in payload.messages],
-                payload.board.model_dump(),
+                board,
             )
-            return AiResponse.model_validate_json(response_json)
+            response = AiResponse.model_validate_json(response_json)
         except OpenRouterConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except (APIError, OpenRouterResponseError, ValidationError) as exc:
@@ -211,11 +256,22 @@ def create_app(
                 status_code=502, detail="OpenRouter returned an invalid response"
             ) from exc
 
-    def require_database_user(username: str = Depends(require_user)) -> str:
-        user_id = get_user_id(db_path, username)
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        return user_id
+        if response.board_update is None:
+            return response
+
+        if board_update_error(response.board_update, board):
+            raise HTTPException(
+                status_code=502, detail="OpenRouter returned an invalid board update"
+            )
+        try:
+            updated = replace_board(
+                db_path, user_id, response.board_update.model_dump()
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=502, detail="OpenRouter returned an invalid board update"
+            ) from exc
+        return AiResponse(message=response.message, board_update=updated)
 
     @app.get("/api/board", response_model=BoardData)
     def read_board(user_id: str = Depends(require_database_user)) -> BoardRecord:
@@ -228,30 +284,12 @@ def create_app(
     def write_board(
         board: BoardData, user_id: str = Depends(require_database_user)
     ) -> BoardRecord:
-        column_ids = [column.id for column in board.columns]
-        card_references = [
-            card_id for column in board.columns for card_id in column.cardIds
-        ]
-        if (
-            len(column_ids) != len(set(column_ids))
-            or len(card_references) != len(set(card_references))
-            or set(card_references) != set(board.cards)
-            or any(card_id != card.id for card_id, card in board.cards.items())
-        ):
-            raise HTTPException(
-                status_code=422,
-                detail="Board columns and cards must reference each other exactly once",
-            )
-
         current_board = get_board(db_path, user_id)
         if current_board is None:
             raise HTTPException(status_code=404, detail="Board not found")
-        current_column_ids = [column["id"] for column in current_board["columns"]]
-        if column_ids != current_column_ids:
-            raise HTTPException(
-                status_code=422,
-                detail="Board columns cannot be added, removed, or reordered",
-            )
+        error = board_update_error(board, current_board)
+        if error:
+            raise HTTPException(status_code=422, detail=error)
 
         try:
             updated = replace_board(db_path, user_id, board.model_dump())

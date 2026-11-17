@@ -133,11 +133,9 @@ describe("KanbanBoard", () => {
       screen.getByRole("textbox", { name: "Message the AI" }),
       "Move this card to Done"
     );
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse({ message: "I moved the card.", board_update: updatedBoard })
-      )
-      .mockResolvedValueOnce(jsonResponse(updatedBoard));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ message: "I moved the card.", board_update: updatedBoard })
+    );
     await user.click(screen.getByRole("button", { name: "Send" }));
 
     expect(await screen.findByText("I moved the card.")).toBeInTheDocument();
@@ -153,17 +151,14 @@ describe("KanbanBoard", () => {
         method: "POST",
         body: JSON.stringify({
           messages: [{ role: "user", content: "Move this card to Done" }],
-          board: sampleBoard,
         }),
       })
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/board",
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify(updatedBoard),
-      })
-    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([, init]) => (init?.method ?? "GET") === "PUT"
+      )
+    ).toBe(false);
   });
 
   it("persists a renamed column when editing ends", async () => {

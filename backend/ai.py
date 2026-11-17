@@ -5,6 +5,9 @@ from openai import OpenAI
 
 MODEL = "openai/gpt-oss-120b"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+MAX_HISTORY_MESSAGES = 20
+# Large enough for the model to echo back a full board update.
+MAX_COMPLETION_TOKENS = 4096
 
 
 class OpenRouterConfigurationError(RuntimeError):
@@ -53,7 +56,7 @@ def chat_with_openrouter(
     )
     request_messages = [
         {"role": "system", "content": system_prompt},
-        *messages,
+        *messages[-MAX_HISTORY_MESSAGES:],
     ]
 
     with _create_openrouter_client() as client:
@@ -61,6 +64,7 @@ def chat_with_openrouter(
             model=MODEL,
             messages=request_messages,
             response_format={"type": "json_object"},
+            max_tokens=MAX_COMPLETION_TOKENS,
         )
 
     if not completion.choices:

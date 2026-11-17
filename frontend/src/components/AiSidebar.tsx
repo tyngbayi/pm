@@ -7,16 +7,14 @@ import type { BoardData } from "@/lib/kanban";
 type AiSidebarProps = {
   isOpen: boolean;
   isBoardSaving: boolean;
-  board: BoardData;
   onClose: () => void;
-  onBoardUpdate: (board: BoardData) => Promise<void>;
+  onBoardUpdate: (board: BoardData) => void;
   onBusyChange: (isBusy: boolean) => void;
 };
 
 export const AiSidebar = ({
   isOpen,
   isBoardSaving,
-  board,
   onClose,
   onBoardUpdate,
   onBusyChange,
@@ -41,13 +39,13 @@ export const AiSidebar = ({
     onBusyChange(true);
 
     try {
-      const response = await chatWithAi(nextMessages, board);
+      const response = await chatWithAi(nextMessages);
       setMessages([
         ...nextMessages,
         { role: "assistant", content: response.message },
       ]);
       if (response.board_update) {
-        await onBoardUpdate(response.board_update);
+        onBoardUpdate(response.board_update);
       }
     } catch (error) {
       setError(
@@ -67,11 +65,11 @@ export const AiSidebar = ({
       inert={!isOpen}
       className={`w-full shrink-0 overflow-hidden transition-[max-height,width,opacity] duration-300 ease-in-out ${
         isOpen
-          ? "max-h-[calc(100vh-3rem)] opacity-100 xl:w-[360px]"
+          ? "max-h-[calc(100vh-4rem)] opacity-100 xl:w-[380px]"
           : "max-h-0 opacity-0 xl:w-0"
       }`}
     >
-      <div className="flex h-[620px] max-h-[calc(100vh-3rem)] min-h-[420px] w-full flex-col overflow-hidden rounded-[32px] border border-[var(--stroke)] bg-white/90 shadow-[var(--shadow)] backdrop-blur xl:sticky xl:top-6">
+      <div className="flex h-[calc(100vh-4rem)] min-h-[420px] w-full flex-col overflow-hidden rounded-[28px] border border-[var(--stroke)] bg-white/90 shadow-[var(--shadow)] backdrop-blur xl:sticky xl:top-8">
         <header className="flex items-center justify-between border-b border-[var(--stroke)] px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">

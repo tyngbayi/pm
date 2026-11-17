@@ -284,16 +284,10 @@ Add a sidebar to the frontend for full AI chat. If the AI returns a `board_updat
 - make the login multi-user
 
 ## Part 12
-- code review agent to clean up the tree
-
-## Part 13
-- change db to use supabase
-
-## Part 14
-- deploy on vercel
-
-## Part 15
 Code review follow-ups (see `docs/CODE_REVIEW.md`, 2026-11-17):
-- [ ] Pin `SESSION_SECRET` in `.env` so container restarts don't silently sign out the demo user
-- [ ] Cap AI chat history / set `max_tokens` in `backend/ai.py` so a long sidebar conversation can't grow cost and latency unbounded
-- [ ] Set `https_only` on the session cookie in `backend/main.py` when deploying behind HTTPS (relevant for Part 14)
+- [x] Pin `SESSION_SECRET` in `.env` so container restarts don't silently sign out the demo user
+- [x] Cap AI chat history / set `max_tokens` in `backend/ai.py` so a long sidebar conversation can't grow cost and latency unbounded
+- [ ] Set `https_only` on the session cookie in `backend/main.py` before any HTTPS deployment (deferred: it would break the current local HTTP deployment)
+- [x] Untrack `frontend/test-results/.last-run.json` and add `/test-results/` and `/playwright-report/` to `frontend/.gitignore` so e2e runs stop dirtying the tree
+- [x] Have `POST /api/ai/chat` read the board from SQLite instead of trusting the client-supplied `board`. Resolved by also having the endpoint validate and persist the `board_update` itself, which removes the client `PUT` round-trip and the lost-update window with it
+- [x] Serve the exported `404.html` page for unknown page routes; `ExportStaticFiles` previously returned 200 with the board shell for e.g. `/nope`

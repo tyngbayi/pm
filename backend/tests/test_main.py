@@ -15,6 +15,7 @@ def client(tmp_path):
         "<h1>Exported app</h1>", encoding="utf-8"
     )
     (static_dir / "project.html").write_text("<h1>Project</h1>", encoding="utf-8")
+    (static_dir / "404.html").write_text("<h1>Not found</h1>", encoding="utf-8")
     app = create_app(
         static_dir,
         session_secret="test-session-secret",
@@ -47,25 +48,33 @@ def test_root_serves_static_export_index(client):
     assert "<h1>Exported app</h1>" in response.text
 
 
-def test_unknown_client_route_falls_back_to_index(client):
+def test_unknown_route_serves_the_exported_404_page(client):
     response = client.get("/client/route")
 
-    assert response.status_code == 200
-    assert "<h1>Exported app</h1>" in response.text
+    assert response.status_code == 404
+    assert "<h1>Not found</h1>" in response.text
 
 
-def test_next_404_file_does_not_block_client_route_fallback(tmp_path):
+def test_pages_revalidate_while_hashed_assets_cache_forever(tmp_path):
+    static_dir = tmp_path / "static"
+    (static_dir / "_next" / "static").mkdir(parents=True)
+    (static_dir / "index.html").write_text("<h1>App</h1>", encoding="utf-8")
+    (static_dir / "_next" / "static" / "chunk.js").write_text("//", encoding="utf-8")
+    client = TestClient(create_app(static_dir))
+
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert (
+        client.get("/_next/static/chunk.js").headers["cache-control"]
+        == "public, max-age=31536000, immutable"
+    )
+
+
+def test_unknown_route_returns_404_without_an_exported_404_page(tmp_path):
     (tmp_path / "index.html").write_text("<h1>Exported app</h1>", encoding="utf-8")
-    (tmp_path / "404.html").write_text("<h1>Not found</h1>", encoding="utf-8")
     client = TestClient(create_app(tmp_path))
 
-    route_response = client.get("/client/route")
-    api_response = client.get("/api/missing")
-
-    assert route_response.status_code == 200
-    assert "<h1>Exported app</h1>" in route_response.text
-    assert api_response.status_code == 404
-    assert "<h1>Not found</h1>" in api_response.text
+    assert client.get("/client/route").status_code == 404
+    assert client.get("/api/missing").status_code == 404
 
 
 def test_extensionless_exported_page_serves_html_file(client):
@@ -148,7 +157,7 @@ def test_board_is_protected_and_seeded_for_authenticated_user(client):
         (
             "post",
             "/api/ai/chat",
-            {"messages": [{"role": "user", "content": "Hello"}], "board": {"columns": [], "cards": {}}},
+            {"messages": [{"role": "user", "content": "Hello"}]},
         ),
         ("patch", "/api/columns/column-id", {"title": "New title"}),
         ("post", "/api/cards", {"column_id": "column-id", "title": "New card"}),
@@ -199,7 +208,7 @@ def test_ai_ping_reports_missing_openrouter_configuration(client, monkeypatch):
     }
 
 
-def test_ai_chat_returns_response_without_board_update(client, monkeypatch):
+def test_ai_chat_reads_the_board_from_the_database(client, monkeypatch):
     sign_in(client)
     board = client.get("/api/board").json()
     messages = [{"role": "user", "content": "What is in my backlog?"}]
@@ -211,10 +220,7 @@ def test_ai_chat_returns_response_without_board_update(client, monkeypatch):
 
     monkeypatch.setattr("main.chat_with_openrouter", respond)
 
-    response = client.post(
-        "/api/ai/chat",
-        json={"messages": messages, "board": board},
-    )
+    response = client.post("/api/ai/chat", json={"messages": messages})
 
     assert response.status_code == 200
     assert response.json() == {
@@ -223,43 +229,58 @@ def test_ai_chat_returns_response_without_board_update(client, monkeypatch):
     }
 
 
-def test_ai_chat_returns_a_valid_board_update(client, monkeypatch):
+def test_ai_chat_persists_a_valid_board_update(client, monkeypatch):
     sign_in(client)
     board = client.get("/api/board").json()
     card_id = board["columns"][0]["cardIds"][0]
     board["cards"][card_id]["title"] = "Updated by AI"
-    response_body = {
-        "message": "I updated the card.",
-        "board_update": board,
-    }
     monkeypatch.setattr(
         "main.chat_with_openrouter",
-        lambda *_: json.dumps(response_body),
+        lambda *_: json.dumps(
+            {"message": "I updated the card.", "board_update": board}
+        ),
     )
 
     response = client.post(
         "/api/ai/chat",
-        json={
-            "messages": [{"role": "user", "content": "Update this card"}],
-            "board": client.get("/api/board").json(),
-        },
+        json={"messages": [{"role": "user", "content": "Update this card"}]},
     )
 
     assert response.status_code == 200
-    assert response.json() == response_body
+    assert response.json() == {
+        "message": "I updated the card.",
+        "board_update": board,
+    }
+    assert client.get("/api/board").json()["cards"][card_id]["title"] == (
+        "Updated by AI"
+    )
+
+
+def test_ai_chat_rejects_a_board_update_that_changes_columns(client, monkeypatch):
+    sign_in(client)
+    board = client.get("/api/board").json()
+    board["columns"].reverse()
+    monkeypatch.setattr(
+        "main.chat_with_openrouter",
+        lambda *_: json.dumps({"message": "Reordered.", "board_update": board}),
+    )
+
+    response = client.post(
+        "/api/ai/chat",
+        json={"messages": [{"role": "user", "content": "Reorder the columns"}]},
+    )
+
+    assert response.status_code == 502
+    assert client.get("/api/board").json()["columns"][0]["title"] == "Backlog"
 
 
 def test_ai_chat_rejects_invalid_structured_output(client, monkeypatch):
     sign_in(client)
-    board = client.get("/api/board").json()
     monkeypatch.setattr("main.chat_with_openrouter", lambda *_: "{invalid")
 
     response = client.post(
         "/api/ai/chat",
-        json={
-            "messages": [{"role": "user", "content": "Hello"}],
-            "board": board,
-        },
+        json={"messages": [{"role": "user", "content": "Hello"}]},
     )
 
     assert response.status_code == 502
