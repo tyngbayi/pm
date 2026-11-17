@@ -291,3 +291,9 @@ Add a sidebar to the frontend for full AI chat. If the AI returns a `board_updat
 
 ## Part 14
 - deploy on vercel
+
+## Part 15
+Code review follow-ups (see `docs/CODE_REVIEW.md`, 2026-11-17):
+- [ ] Pin `SESSION_SECRET` in `.env` so container restarts don't silently sign out the demo user
+- [ ] Cap AI chat history / set `max_tokens` in `backend/ai.py` so a long sidebar conversation can't grow cost and latency unbounded
+- [ ] Set `https_only` on the session cookie in `backend/main.py` when deploying behind HTTPS (relevant for Part 14)

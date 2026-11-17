@@ -1,0 +1,126 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project documentation
+
+`AGENTS.md` (root), `backend/AGENTS.md`, and `frontend/AGENTS.md` hold the business
+requirements, technical decisions, and color palette. `docs/PLAN.md` is the working
+plan and test policy; read it before starting work. `docs/DATABASE.md` is the
+approved SQLite schema. Keep these updated as behavior changes.
+
+## Coding standards (from AGENTS.md)
+
+1. Use latest library versions and idiomatic approaches.
+2. Keep it simple. Never over-engineer; no unnecessary defensive programming; no extra features.
+3. Be concise. Keep the README minimal. No emojis, ever.
+4. When hitting issues, find the root cause with evidence before fixing. Do not guess.
+
+## Commands
+
+Run the app (builds the Docker image, which bakes in the Next.js static export, then
+starts it on `http://localhost:8000` with the `pm-data` volume and `.env`):
+
+```sh
+./scripts/start.sh    # scripts/start.bat on Windows
+./scripts/stop.sh
+```
+
+Backend (from `backend/`):
+
+```sh
+uv run pytest                                  # all tests, with coverage of main + database
+uv run pytest tests/test_main.py::test_health_endpoint_returns_ok
+uv run uvicorn main:app --reload               # local dev server without Docker
+```
+
+Frontend (from `frontend/`):
+
+```sh
+npm run test:unit                              # vitest
+npm run test:unit -- src/lib/kanban.test.ts    # single file
+npm run test:unit:watch
+npm run lint
+npm run build                                  # static export to out/
+npm run test:e2e                               # Playwright; app must already be running
+npm run test:e2e -- --grep "login"
+```
+
+Playwright targets `http://127.0.0.1:8000` by default; override with
+`PLAYWRIGHT_BASE_URL`. `npm run test:all` assumes the app is running.
+
+Note `next dev` serves the frontend alone, so API calls fail. For full-stack work use
+the Docker scripts, or run uvicorn and point the frontend at it.
+
+## Architecture
+
+Single deployable: FastAPI serves both the JSON API under `/api` and the Next.js
+static export mounted at `/`.
+
+**Build pipeline.** The Dockerfile has a `node:22-alpine` stage that runs
+`next build` (`output: "export"` in `next.config.ts`), then copies `frontend/out`
+into the Python stage as `backend/static`. Frontend changes are only visible after an
+image rebuild, which is why the start scripts always rebuild.
+
+**Static serving.** `ExportStaticFiles` in `backend/main.py` subclasses `StaticFiles`
+to make the export work: on a 404 it retries `<path>.html` (extensionless exported
+pages), then falls back to `index.html` for client-side routes. Paths under `api/` or
+with a file suffix get a real 404 instead.
+
+**App construction.** `create_app(static_dir, session_secret, database_path)` in
+`backend/main.py` builds the app, so tests inject a `tmp_path` database and static
+directory. The module-level `app` uses `DATABASE_PATH` (default `data/kanban.db`).
+A lifespan hook runs `initialize_database`, which applies the `CREATE TABLE IF NOT
+EXISTS` schema and seeds the `user` account, its board, and five columns with eight
+cards when absent.
+
+**Auth.** Starlette `SessionMiddleware` with a signed `pm_session` cookie. Credentials
+are hardcoded (`user` / `password`) and no passwords are stored. `require_user`
+guards routes; `require_database_user` additionally resolves the DB user id, and all
+database queries join through `boards.user_id` to scope data to that user.
+
+**Persistence.** `backend/database.py` is plain `sqlite3` with no ORM. Every call
+opens its own connection via the `_connection` context manager, which creates parent
+dirs, sets `row_factory`, and enables `PRAGMA foreign_keys = ON`. `columns` and
+`cards` both have `UNIQUE (parent_id, position)`, so reordering cannot write
+positions in place: `_rewrite_positions` first shifts the whole column past the
+current maximum, then writes final zero-based positions, avoiding transient
+collisions. `_board_data` is the single place that converts rows into the frontend
+`BoardData` shape (columns ordered by position, `cardIds` per column, `cards` keyed
+by id).
+
+**Board contract.** `BoardData` is mirrored in three places and must stay in sync:
+Pydantic models in `backend/main.py`, `TypedDict`s in `backend/database.py`, and TS
+types in `frontend/src/lib/kanban.ts`. `PUT /api/board` validates referential
+integrity (each card referenced exactly once, `cards` keys matching card ids) and
+rejects any change to the column set or column order, since the MVP only renames
+columns.
+
+**Frontend state.** `KanbanBoard.tsx` owns all board state; there is no store or
+context. It fetches `GET /api/board` on mount and routes every mutation through a
+`runMutation` helper that serializes writes behind an `isBoardBusy` flag and surfaces
+failures inline. Pure reordering logic lives in `moveCard` in
+`frontend/src/lib/kanban.ts` and is unit tested separately from the component.
+`frontend/src/lib/api.ts` is the only place that calls `fetch`; it throws `ApiError`
+carrying the status and the FastAPI `detail` string.
+
+**AI.** `backend/ai.py` talks to OpenRouter through the OpenAI SDK with
+`base_url=https://openrouter.ai/api/v1` and model `openai/gpt-oss-120b` (paid calls).
+`OPENROUTER_API_KEY` comes from the environment via `.env`, which the start scripts
+pass to the container. `chat_with_openrouter` embeds the current board JSON in the
+system prompt and requests `response_format: json_object`; `POST /api/ai/chat`
+validates the reply against `AiResponse` (`message` plus optional `board_update`) and
+returns 503 when the key is missing, 502 on an invalid or failed response.
+`AiSidebar.tsx` sends the conversation plus board, and persists any `board_update`
+through `PUT /api/board` before refreshing.
+
+## Testing
+
+Per `docs/PLAN.md`: add focused tests for new behavior and user-facing flows, test
+success and relevant failure cases for API contract changes, and update the tests for
+a flow in the same change set. Coverage is informative, not a gate. There is no CI
+workflow, so do not describe tests as CI-enforced.
+
+Backend tests use `TestClient` against a real temporary SQLite file. Route tests
+patch `main.ask_openrouter` / `main.chat_with_openrouter`; `tests/test_ai.py` patches
+`ai.OpenAI` to assert the outgoing request shape. Frontend unit tests mock `fetch`.
