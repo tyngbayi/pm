@@ -25,6 +25,15 @@ export type Comment = {
   author_name: string;
   created_at: string;
 };
+
+/** One entry in a board's history of who changed what. */
+export type Activity = {
+  id: string;
+  summary: string;
+  author_name: string;
+  created_at: string;
+};
+
 /** One card assigned to the signed-in user, placed in the board it sits on. */
 export type Assignment = {
   card_id: string;

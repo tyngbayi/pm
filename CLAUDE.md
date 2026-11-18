@@ -181,6 +181,19 @@ empty date sorts first as text and would otherwise outrank an overdue card.
 `MyWorkDialog.tsx` fetches on open rather than holding the list in
 `KanbanBoard` state, and selecting a row opens that card's board first.
 
+**Activity.** `board_activity` records one rendered summary per board change,
+read back by `GET /api/boards/{id}/activity` (scoped like any board read, so a
+non-member gets a 404) and rendered by `ActivityDialog.tsx` behind a `History`
+icon in the header. `database._record` runs inside each mutation's own
+connection, so an entry cannot outlive a write that failed; `rename_column` and
+`update_card` therefore select the row's current title before overwriting it,
+since the summary names what it replaced. `add_board_member`,
+`remove_board_member`, and `replace_board` take an explicit `actor_id` rather
+than attributing the change to `boards.user_id`, which is only the owner.
+`user_id` is nullable with `ON DELETE SET NULL` and the read `COALESCE`s to
+"A deleted account", so the history survives its author. Ordered by `rowid
+DESC` for the same reason comments use `rowid`, and capped at `ACTIVITY_LIMIT`.
+
 **Frontend state.** `KanbanBoard.tsx` owns all board state; there is no store or
 context. Its `openBoard` helper loads the board list and opens one by id, falling
 back to the first, and every mutation runs through a `runMutation` helper that

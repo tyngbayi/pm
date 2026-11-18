@@ -119,6 +119,20 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX card_comments_by_card ON card_comments (card_id);
         """,
     ),
+    (
+        6,
+        """
+        CREATE TABLE board_activity (
+            id TEXT PRIMARY KEY NOT NULL,
+            board_id TEXT NOT NULL
+                     REFERENCES boards (id) ON DELETE CASCADE,
+            user_id TEXT REFERENCES users (id) ON DELETE SET NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX board_activity_by_board ON board_activity (board_id);
+        """,
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -220,6 +234,15 @@ class AssignmentRecord(TypedDict):
     board_id: str
     board_name: str
     column_title: str
+
+
+class ActivityRecord(TypedDict):
+    """One entry in a board's history."""
+
+    id: str
+    summary: str
+    author_name: str
+    created_at: str
 
 
 class ColumnRecord(TypedDict):
@@ -518,6 +541,22 @@ ACCESSIBLE_BOARD_IDS = """
 """
 
 
+def _record(
+    connection: sqlite3.Connection,
+    board_id: str,
+    user_id: str,
+    summary: str,
+) -> None:
+    """Note one change to a board in its history."""
+    connection.execute(
+        """
+        INSERT INTO board_activity (id, board_id, user_id, summary, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (_new_id("act"), board_id, user_id, summary, _now()),
+    )
+
+
 def _board_summary(row: sqlite3.Row, owned: bool) -> BoardSummary:
     return {
         "id": row["id"],
@@ -574,6 +613,7 @@ def rename_board(
         )
         if cursor.rowcount != 1:
             return None
+        _record(connection, board_id, user_id, f'Renamed the board to "{name}"')
         row = connection.execute(
             f"SELECT {BOARD_FIELDS} FROM boards WHERE boards.id = ?", (board_id,)
         ).fetchone()
@@ -639,10 +679,19 @@ def board_member_ids(database_path: Path, board_id: str) -> set[str]:
         }
 
 
-def add_board_member(database_path: Path, board_id: str, user_id: str) -> bool:
+def _display_name(connection: sqlite3.Connection, user_id: str) -> str:
+    row = connection.execute(
+        "SELECT display_name FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    return "" if row is None else row["display_name"]
+
+
+def add_board_member(
+    database_path: Path, board_id: str, member_id: str, actor_id: str
+) -> bool:
     """Share a board. False when the user already reaches it."""
     with _connection(database_path) as connection:
-        if user_id in {
+        if member_id in {
             row["user_id"]
             for row in connection.execute(BOARD_MEMBER_IDS, (board_id, board_id))
         }:
@@ -652,18 +701,25 @@ def add_board_member(database_path: Path, board_id: str, user_id: str) -> bool:
             INSERT INTO board_members (board_id, user_id, created_at)
             VALUES (?, ?, ?)
             """,
-            (board_id, user_id, _now()),
+            (board_id, member_id, _now()),
+        )
+        _record(
+            connection,
+            board_id,
+            actor_id,
+            f"Shared the board with {_display_name(connection, member_id)}",
         )
         return True
 
 
 def remove_board_member(
-    database_path: Path, board_id: str, user_id: str
+    database_path: Path, board_id: str, member_id: str, actor_id: str
 ) -> bool:
     with _connection(database_path) as connection:
+        name = _display_name(connection, member_id)
         cursor = connection.execute(
             "DELETE FROM board_members WHERE board_id = ? AND user_id = ?",
-            (board_id, user_id),
+            (board_id, member_id),
         )
         if cursor.rowcount != 1:
             return False
@@ -675,7 +731,10 @@ def remove_board_member(
             WHERE assignee_id = ?
               AND column_id IN (SELECT id FROM columns WHERE board_id = ?)
             """,
-            (user_id, board_id),
+            (member_id, board_id),
+        )
+        _record(
+            connection, board_id, actor_id, f"Removed {name} from the board"
         )
         return True
 
@@ -751,7 +810,7 @@ def get_board(
 
 
 def replace_board(
-    database_path: Path, board_id: str, board_data: BoardRecord
+    database_path: Path, user_id: str, board_id: str, board_data: BoardRecord
 ) -> BoardRecord:
     """Overwrite a board's contents. Callers must have checked ownership."""
     with _connection(database_path) as connection:
@@ -809,6 +868,7 @@ def replace_board(
             """,
             [tuple(row) for row in saved if row["card_id"] in cards],
         )
+        _record(connection, board_id, user_id, "Rewrote the whole board")
         return _board_data(connection, board_id)
 
 
@@ -816,16 +876,27 @@ def rename_column(
     database_path: Path, user_id: str, column_id: str, title: str
 ) -> bool:
     with _connection(database_path) as connection:
-        cursor = connection.execute(
+        before = connection.execute(
             f"""
-            UPDATE columns
-            SET title = ?
-            WHERE id = ?
-              AND board_id IN ({ACCESSIBLE_BOARD_IDS})
+            SELECT columns.board_id, columns.title
+            FROM columns
+            WHERE columns.id = ?
+              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
             """,
-            (title, column_id, user_id, user_id),
+            (column_id, user_id, user_id),
+        ).fetchone()
+        if before is None:
+            return False
+        connection.execute(
+            "UPDATE columns SET title = ? WHERE id = ?", (title, column_id)
         )
-        return cursor.rowcount == 1
+        _record(
+            connection,
+            before["board_id"],
+            user_id,
+            f'Renamed column "{before["title"]}" to "{title}"',
+        )
+        return True
 
 
 def _accessible_column_board_id(
@@ -860,6 +931,7 @@ def create_column(
             """,
             (_new_id("col"), board_id, title, position),
         )
+        _record(connection, board_id, user_id, f'Added column "{title}"')
         return _board_data(connection, board_id)
 
 
@@ -871,7 +943,11 @@ def delete_column(
         board_id = _accessible_column_board_id(connection, user_id, column_id)
         if board_id is None:
             return None
+        title = connection.execute(
+            "SELECT title FROM columns WHERE id = ?", (column_id,)
+        ).fetchone()["title"]
         connection.execute("DELETE FROM columns WHERE id = ?", (column_id,))
+        _record(connection, board_id, user_id, f'Deleted column "{title}"')
         _rewrite_positions(
             connection,
             "columns",
@@ -893,6 +969,10 @@ def move_column(
         column_ids.remove(column_id)
         column_ids.insert(min(target_position, len(column_ids)), column_id)
         _rewrite_positions(connection, "columns", "board_id", board_id, column_ids)
+        title = connection.execute(
+            "SELECT title FROM columns WHERE id = ?", (column_id,)
+        ).fetchone()["title"]
+        _record(connection, board_id, user_id, f'Moved column "{title}"')
         return _board_data(connection, board_id)
 
 
@@ -906,7 +986,7 @@ def create_card(
     with _connection(database_path) as connection:
         column = connection.execute(
             f"""
-            SELECT columns.id
+            SELECT columns.id, columns.board_id
             FROM columns
             WHERE columns.id = ?
               AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
@@ -928,6 +1008,7 @@ def create_card(
             """,
             (card_id, column_id, title, details, position),
         )
+        _record(connection, column["board_id"], user_id, f'Added card "{title}"')
         row = connection.execute(
             f"SELECT {CARD_FIELDS} FROM cards WHERE id = ?", (card_id,)
         ).fetchone()
@@ -959,7 +1040,7 @@ def update_card(
     with _connection(database_path) as connection:
         row = connection.execute(
             f"""
-            SELECT cards.id
+            SELECT cards.title, columns.board_id
             FROM cards
             JOIN columns ON columns.id = cards.column_id
             WHERE cards.id = ?
@@ -982,6 +1063,12 @@ def update_card(
         updated = connection.execute(
             f"SELECT {CARD_FIELDS} FROM cards WHERE id = ?", (card_id,)
         ).fetchone()
+        _record(
+            connection,
+            row["board_id"],
+            user_id,
+            f'Edited card "{updated["title"]}"',
+        )
         return _card_data(updated)
 
 
@@ -1032,7 +1119,7 @@ def delete_card(database_path: Path, user_id: str, card_id: str) -> bool:
     with _connection(database_path) as connection:
         row = connection.execute(
             f"""
-            SELECT cards.column_id
+            SELECT cards.column_id, cards.title, columns.board_id
             FROM cards
             JOIN columns ON columns.id = cards.column_id
             WHERE cards.id = ?
@@ -1045,6 +1132,12 @@ def delete_card(database_path: Path, user_id: str, card_id: str) -> bool:
 
         column_id = row["column_id"]
         connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+        _record(
+            connection,
+            row["board_id"],
+            user_id,
+            f'Deleted card "{row["title"]}"',
+        )
         _rewrite_positions(
             connection,
             "cards",
@@ -1065,7 +1158,7 @@ def move_card(
     with _connection(database_path) as connection:
         card = connection.execute(
             f"""
-            SELECT cards.column_id
+            SELECT cards.column_id, cards.title
             FROM cards
             JOIN columns ON columns.id = cards.column_id
             WHERE cards.id = ?
@@ -1075,7 +1168,7 @@ def move_card(
         ).fetchone()
         target = connection.execute(
             f"""
-            SELECT columns.id, columns.board_id
+            SELECT columns.id, columns.board_id, columns.title
             FROM columns
             WHERE columns.id = ?
               AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
@@ -1119,6 +1212,12 @@ def move_card(
             )
 
         board_id = target["board_id"]
+        _record(
+            connection,
+            board_id,
+            user_id,
+            f'Moved card "{card["title"]}" to {target["title"]}',
+        )
         return _board_data(connection, board_id)
 
 
@@ -1188,6 +1287,21 @@ def create_card_comment(
             """,
             (comment_id, card_id, user_id, body, _now()),
         )
+        card = connection.execute(
+            """
+            SELECT cards.title, columns.board_id
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            WHERE cards.id = ?
+            """,
+            (card_id,),
+        ).fetchone()
+        _record(
+            connection,
+            card["board_id"],
+            user_id,
+            f'Commented on "{card["title"]}"',
+        )
         row = connection.execute(
             f"""
             SELECT {COMMENT_FIELDS}
@@ -1227,6 +1341,47 @@ def _card_is_reachable(
         ).fetchone()
         is not None
     )
+
+
+ACTIVITY_LIMIT = 50
+
+
+def list_board_activity(
+    database_path: Path, user_id: str, board_id: str
+) -> list[ActivityRecord] | None:
+    """A board's recent history newest first, or None when it is out of reach.
+
+    Ordered by rowid, not `created_at`, which is only second-resolution: a burst
+    of changes within one second would otherwise come back in a random order.
+    An entry outlives its author, so the name falls back when the account is
+    gone.
+    """
+    with _connection(database_path) as connection:
+        if _accessible_board_id(connection, user_id, board_id) is None:
+            return None
+        rows = connection.execute(
+            f"""
+            SELECT board_activity.id, board_activity.summary,
+                   COALESCE(users.display_name, 'A deleted account')
+                       AS author_name,
+                   board_activity.created_at
+            FROM board_activity
+            LEFT JOIN users ON users.id = board_activity.user_id
+            WHERE board_activity.board_id = ?
+            ORDER BY board_activity.rowid DESC
+            LIMIT {ACTIVITY_LIMIT}
+            """,
+            (board_id,),
+        ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "summary": row["summary"],
+                "author_name": row["author_name"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
 
 def list_assignments(database_path: Path, user_id: str) -> list[AssignmentRecord]:

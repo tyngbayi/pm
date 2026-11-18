@@ -1,4 +1,5 @@
 import type {
+  Activity,
   Assignment,
   BoardData,
   Card,
@@ -250,6 +251,11 @@ export const moveCard = (
 
 export const getAssignments = () =>
   requestJson<Assignment[]>("/api/assignments");
+
+export const getBoardActivity = (boardId: string) =>
+  requestJson<Activity[]>(
+    `/api/boards/${encodeURIComponent(boardId)}/activity`
+  );
 
 export const chatWithAi = (boardId: string, messages: AiChatMessage[]) =>
   requestJson<AiChatResponse>(

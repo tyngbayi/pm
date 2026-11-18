@@ -584,3 +584,60 @@ That falls out of the single definition rather than being special-cased.
 The dialog fetches on open rather than holding assignments in `KanbanBoard`
 state. The list is a read-only snapshot, so keeping it in step with every card
 edit would cost more than refetching the handful of rows when it is opened.
+---
+
+## Part 22: The board activity log
+
+A board is now shared, so a change can arrive from someone else while you are
+looking at it. Nothing recorded who did what: a renamed column or a moved card
+simply appeared, and the AI sidebar's board updates were indistinguishable from
+a teammate's.
+
+### Steps
+
+- [x] Migration 6 adds `board_activity`
+- [x] Every board mutation records one entry naming its author
+- [x] `GET /api/boards/{id}/activity`, newest first, scoped like the board
+- [x] A `Board history` dialog behind a header icon
+
+### Success criteria
+
+- [x] Each kind of change -- card, column, board, membership, comment -- is
+      recorded with a readable summary
+- [x] A member reads the same history as the owner; a non-member gets a 404
+- [x] An entry outlives the account that wrote it
+- [x] Backend 175 tests / 98% coverage, frontend 60 unit tests, 32 Playwright
+      tests, green on a full run
+
+### Decisions
+
+Recording lives in `database.py`, not in the routes. Every mutation already
+opens a connection and resolves the board id to check access, so `_record` runs
+inside that same transaction and cannot drift from the write it describes. A
+route-level decorator would have had to re-resolve the board and could record a
+change that then failed.
+
+Summaries are written at the point of the change, not reconstructed. The old
+column title or card title is read before the `UPDATE` that replaces it, which
+is why `rename_column` and `update_card` now select the row's contents rather
+than just its id. Storing a rendered string rather than a structured diff keeps
+the reader simple and the history stable when a card is later deleted.
+
+`board_activity.user_id` is nullable with `ON DELETE SET NULL`, and the read
+falls back to "A deleted account". The history is a record of what happened to
+the board; cascading it away with the author would quietly rewrite it.
+
+Ordered by `rowid DESC`, the same choice as comments in Part 20 and for the
+same reason: `created_at` is second-resolution, so a burst of changes within one
+second would come back in a random order. Capped at `ACTIVITY_LIMIT` rows,
+since the panel is for recent context rather than an audit export.
+
+`add_board_member` and `remove_board_member` take an explicit `actor_id` rather
+than attributing the entry to `boards.user_id`. Those routes are owner-only
+today, but inferring the author from the owner column would silently produce a
+wrong name the moment that changes.
+
+`replace_board` records one "Rewrote the whole board" entry rather than
+diffing. That path is the AI sidebar and the `PUT` route, where the interesting
+fact is that the board was replaced wholesale, not which of twenty positions
+moved.

@@ -7,6 +7,7 @@
 - **Column**: belongs to a board and has a stable order and editable title.
 - **Card**: belongs to one column and has a stable order, title, details, priority, due date, labels, and an optional assignee.
 - **Comment**: a line of discussion written by one user on one card, in a thread anyone who can open the board may read and add to.
+- **Activity**: one recorded change to a board, with a rendered summary and the account that made it.
 
 ## SQLite schema
 
@@ -84,6 +85,17 @@ CREATE TABLE card_comments (
     created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX card_comments_by_card ON card_comments (card_id);
+
+-- Added by migration 6. `user_id` is nullable so an entry outlives its author.
+CREATE TABLE board_activity (
+    id         TEXT PRIMARY KEY NOT NULL,
+    board_id   TEXT NOT NULL
+               REFERENCES boards (id) ON DELETE CASCADE,
+    user_id    TEXT REFERENCES users (id) ON DELETE SET NULL,
+    summary    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX board_activity_by_board ON board_activity (board_id);
 ```
 
 ## Relationships and constraints
@@ -115,6 +127,16 @@ CREATE INDEX card_comments_by_card ON card_comments (card_id);
   board union. There is no "my work" table: it would be a second source of
   truth for something the existing rows already answer. The ordering puts
   `due_date = ''` last explicitly, since an empty string otherwise sorts first.
+- `board_activity.summary` stores a rendered sentence rather than a structured
+  diff, written at the moment of the change so it can name the old title a
+  later row no longer holds. Entries are read newest first by `rowid`, for the
+  same reason comments are read by it, and capped at 50 rows: the panel is
+  recent context, not an audit export.
+- `board_activity.user_id` is nullable and `ON DELETE SET NULL`, so deleting an
+  account leaves its entries in place and the read falls back to "A deleted
+  account". The board's history is a record of what happened to the board, so
+  cascading it away with the author would rewrite it. Deleting the board itself
+  does cascade, since there is then nothing to show it against.
 - A card's comment count is never stored. It is counted from `card_comments` in every card query, so it cannot drift from the thread.
 
 ## Migrations
@@ -134,6 +156,7 @@ Never edit a released migration; append a new one instead.
 | 3 | Add `priority`, `due_date`, `labels`, `assignee_id` to `cards` |
 | 4 | Add `board_members` for boards shared with users who do not own them |
 | 5 | Add `card_comments` for per-card discussion threads |
+| 6 | Add `board_activity` for the per-board history of who changed what |
 
 A database migrated from v0 has no credentials for the seeded `user` account, so
 `initialize_database` backfills the demo password and promotes it to `admin`

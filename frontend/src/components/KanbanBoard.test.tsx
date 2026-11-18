@@ -88,6 +88,21 @@ const assignments = [
   },
 ];
 
+const activity = [
+  {
+    id: "act-2",
+    summary: 'Renamed the board to "My board"',
+    author_name: "Grace Hopper",
+    created_at: "2026-01-02T09:30:00+00:00",
+  },
+  {
+    id: "act-1",
+    summary: 'Added card "Align roadmap themes"',
+    author_name: "Ada Lovelace",
+    created_at: "2026-01-01T08:00:00+00:00",
+  },
+];
+
 const members = [
   { id: "user-1", display_name: "Ada Lovelace" },
   { id: "user-2", display_name: "Grace Hopper" },
@@ -159,6 +174,9 @@ describe("KanbanBoard", () => {
       }
       if (path === "/api/assignments" && method === "GET") {
         return jsonResponse(assignments);
+      }
+      if (path.endsWith("/activity") && method === "GET") {
+        return jsonResponse(activity);
       }
       if (path === "/api/auth/me" && method === "GET") {
         return signedInUser
@@ -942,6 +960,30 @@ describe("KanbanBoard", () => {
       await screen.findByRole("dialog", { name: "Edit Draft the pricing page" })
     ).toBeInTheDocument();
     expect(screen.getByTestId("column-col-roadmap")).toBeInTheDocument();
+  });
+
+  it("lists the active board's history newest first", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(screen.getByRole("button", { name: "Board history" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Board history",
+    });
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((entry) => entry.textContent)
+    ).toEqual([
+      'Renamed the board to "My board"Grace Hopper \u00b7 2026-01-02 09:30',
+      'Added card "Align roadmap themes"Ada Lovelace \u00b7 2026-01-01 08:00',
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/boards/board-1/activity",
+      expect.anything()
+    );
   });
 
   it("shows API failures and allows retrying the initial load", async () => {

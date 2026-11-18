@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ListChecks, LogOut, Sparkles, Users } from "lucide-react";
+import { History, ListChecks, LogOut, Sparkles, Users } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -21,6 +21,7 @@ import { BoardSwitcher } from "@/components/BoardSwitcher";
 import { CardDialog } from "@/components/CardDialog";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { MyWorkDialog } from "@/components/MyWorkDialog";
+import { ActivityDialog } from "@/components/ActivityDialog";
 import { NewColumnForm } from "@/components/NewColumnForm";
 import { ShareDialog } from "@/components/ShareDialog";
 import {
@@ -67,6 +68,7 @@ export const KanbanBoard = () => {
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [isSharing, setIsSharing] = useState(false);
   const [isMyWorkOpen, setIsMyWorkOpen] = useState(false);
+  const [isActivityOpen, setIsActivityOpen] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -459,6 +461,14 @@ export const KanbanBoard = () => {
                 >
                   <ListChecks aria-hidden className="h-5 w-5" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setIsActivityOpen(true)}
+                  aria-label="Board history"
+                  className="rounded-full border border-[var(--stroke)] p-2.5 text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                >
+                  <History aria-hidden className="h-5 w-5" />
+                </button>
                 {user?.role === "admin" && (
                   <Link
                     href="/admin"
@@ -572,6 +582,12 @@ export const KanbanBoard = () => {
             void handleOpenAssignment(boardId, cardId)
           }
           onClose={() => setIsMyWorkOpen(false)}
+        />
+      )}
+      {isActivityOpen && activeBoardId && (
+        <ActivityDialog
+          boardId={activeBoardId}
+          onClose={() => setIsActivityOpen(false)}
         />
       )}
       {editingCard && user && (

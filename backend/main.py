@@ -22,6 +22,7 @@ from ai import (
     chat_with_openrouter,
 )
 from database import (
+    ActivityRecord,
     AssignmentRecord,
     BoardRecord,
     BoardSummary,
@@ -50,6 +51,7 @@ from database import (
     get_user_by_username,
     initialize_database,
     list_assignments,
+    list_board_activity,
     list_board_members,
     list_boards,
     list_card_comments,
@@ -223,6 +225,13 @@ class CommentData(BaseModel):
 
 class CreateCommentRequest(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+class ActivityData(BaseModel):
+    id: str
+    summary: str
+    author_name: str
+    created_at: str
 
 
 class AssignmentData(BaseModel):
@@ -501,7 +510,10 @@ def create_app(
             )
         try:
             updated = replace_board(
-                db_path, payload.board_id, response.board_update.model_dump()
+                db_path,
+                user_id,
+                payload.board_id,
+                response.board_update.model_dump(),
             )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
@@ -577,7 +589,7 @@ def create_app(
         member = get_user_by_username(db_path, payload.username.strip())
         if member is None:
             raise HTTPException(status_code=404, detail="User not found")
-        if not add_board_member(db_path, board_id, member["id"]):
+        if not add_board_member(db_path, board_id, member["id"], user_id):
             raise HTTPException(
                 status_code=409, detail="That user already has this board"
             )
@@ -590,7 +602,7 @@ def create_app(
         user_id: str = Depends(require_database_user),
     ) -> Response:
         require_board_owner(board_id, user_id)
-        if not remove_board_member(db_path, board_id, member_id):
+        if not remove_board_member(db_path, board_id, member_id, user_id):
             raise HTTPException(status_code=404, detail="Board member not found")
         return Response(status_code=204)
 
@@ -617,7 +629,9 @@ def create_app(
             raise HTTPException(status_code=422, detail=error)
 
         try:
-            updated = replace_board(db_path, board_id, board.model_dump())
+            updated = replace_board(
+                db_path, user_id, board_id, board.model_dump()
+            )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
                 status_code=409, detail="Board data conflicts with existing records"
@@ -784,6 +798,17 @@ def create_app(
         if not delete_card_comment(db_path, user_id, comment_id):
             raise HTTPException(status_code=404, detail="Comment not found")
         return Response(status_code=204)
+
+    @app.get(
+        "/api/boards/{board_id}/activity", response_model=list[ActivityData]
+    )
+    def read_board_activity(
+        board_id: str, user_id: str = Depends(require_database_user)
+    ) -> list[ActivityRecord]:
+        activity = list_board_activity(db_path, user_id, board_id)
+        if activity is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return activity
 
     @app.get("/api/assignments", response_model=list[AssignmentData])
     def read_assignments(
