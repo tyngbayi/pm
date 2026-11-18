@@ -356,7 +356,7 @@ def test_column_rename_requires_an_existing_owned_column(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"id": column_id, "title": "Queue"}
+    assert response.json() == {"id": column_id, "title": "Queue", "wipLimit": 0}
     assert client.get(board_url(client)).json()["columns"][0]["title"] == "Queue"
     assert client.patch(
         "/api/columns/missing-column", json={"title": "Nope"}

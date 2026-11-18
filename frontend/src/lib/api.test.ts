@@ -28,10 +28,10 @@ import {
   moveColumn,
   renameBoard,
   removeBoardMember,
-  renameColumn,
   replaceBoard,
   setChecklistItemDone,
   updateCard,
+  updateColumn,
 } from "@/lib/api";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -76,7 +76,7 @@ describe("API client", () => {
     await addBoardMember("board/id", "teammate");
     await removeBoardMember("board/id", "member/id");
     await replaceBoard("board/id", board);
-    await renameColumn("column/id", "Renamed");
+    await updateColumn("column/id", { title: "Renamed", wipLimit: 3 });
     await createColumn("board-1", "Blocked");
     await deleteColumn("column/id");
     await moveColumn("column/id", 1);
@@ -137,6 +137,7 @@ describe("API client", () => {
 
     expect(bodyOf(2)).toEqual({ username: "user", password: "password" });
     expect(bodyOf(10)).toEqual({ username: "teammate" });
+    expect(bodyOf(13)).toEqual({ title: "Renamed", wipLimit: 3 });
     expect(bodyOf(14)).toEqual({ board_id: "board-1", title: "Blocked" });
     expect(bodyOf(16)).toEqual({ position: 1 });
     expect(bodyOf(21)).toEqual({ body: "Looks good" });

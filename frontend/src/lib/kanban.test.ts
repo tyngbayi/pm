@@ -11,8 +11,8 @@ import {
 
 describe("moveCard", () => {
   const baseColumns: Column[] = [
-    { id: "col-a", title: "A", cardIds: ["card-1", "card-2"] },
-    { id: "col-b", title: "B", cardIds: ["card-3"] },
+    { id: "col-a", title: "A", cardIds: ["card-1", "card-2"], wipLimit: 0 },
+    { id: "col-b", title: "B", cardIds: ["card-3"], wipLimit: 0 },
   ];
 
   it("reorders cards in the same column", () => {
@@ -50,8 +50,8 @@ describe("filterBoard", () => {
 
   const board: BoardData = {
     columns: [
-      { id: "col-a", title: "A", cardIds: ["card-1", "card-2"] },
-      { id: "col-b", title: "B", cardIds: ["card-3"] },
+      { id: "col-a", title: "A", cardIds: ["card-1", "card-2"], wipLimit: 0 },
+      { id: "col-b", title: "B", cardIds: ["card-3"], wipLimit: 0 },
     ],
     cards: {
       "card-1": card("card-1", {

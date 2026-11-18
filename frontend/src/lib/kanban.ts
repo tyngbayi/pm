@@ -58,6 +58,8 @@ export type Column = {
   id: string;
   title: string;
   cardIds: string[];
+  /** Cards this column should hold at once; 0 for no limit. Advisory only. */
+  wipLimit: number;
 };
 
 export type BoardData = {

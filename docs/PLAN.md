@@ -704,3 +704,57 @@ The Playwright spec clicks the checkbox instead of calling `check()`. The box is
 server-controlled -- there is no optimistic update, and it stays disabled until
 the `PATCH` returns -- so `check()`'s own post-click state assertion fires while
 the input is still unchanged and fails on a working app.
+
+## Part 24: Column WIP limits
+
+Columns had a title and an order but no sense of capacity. A board could show
+nine cards sitting in "In Progress" and nothing about it looked wrong, which is
+exactly the failure kanban exists to make visible.
+
+### Steps
+
+- [x] Migration 8 adds `columns.wip_limit`, defaulting to 0 for no limit
+- [x] `PATCH /api/columns/{id}` takes `title`, `wipLimit`, or both
+- [x] A limit editor behind a gauge icon in the column header
+- [x] The card count turns red and reads "N of M" once a column is over
+
+### Success criteria
+
+- [x] A limit is set, changed, cleared with 0, and survives a reload
+- [x] A column over its limit is flagged but still accepts cards
+- [x] A member may set a limit on a shared board; a non-member gets a 404
+- [x] A limit survives a whole-board rewrite
+- [x] Backend 200 tests / 98% coverage, frontend 64 unit tests, 34 Playwright
+      tests, green on a full run
+
+### Decisions
+
+The limit is advisory and never enforced. Refusing a move that would breach it
+would strand work mid-flow -- the card has to go somewhere, and the honest
+place is the column it is actually in. A board that lies about where work sits
+is worse than a board that admits it is over capacity, so the limit is a
+prompt to a human, not a gate in the API. `test_the_board_lets_a_column_go_over
+_its_limit` pins that down so a later "fix" has to argue with a test.
+
+0 means no limit, rather than `NULL`. A nullable integer would make every read
+and every comparison handle `None` for a number that is never unknown, only
+absent, and absent is exactly what zero already says here.
+
+`rename_column` became `update_column` with a `changes` dict, mirroring
+`update_card`. Two single-field routes would have meant two activity entries
+for one user action, and the header saves both fields from one form.
+
+The activity summary drops to "and set its limit to 3" when a rename happened
+in the same request, since the rename clause has already named the column.
+Both clauses in full read "Renamed column X to Y and Set column Y to...",
+which is not a sentence.
+
+`ColumnData.wipLimit` defaults to 0 rather than being required. The AI replies
+with the board shape it was handed, and an older or careless reply that omits
+the field should lose the limits, not fail validation and lose the whole
+update.
+
+The editor is a toggle behind a gauge icon rather than an always-visible
+input. A column header already carries a title field and three buttons; a
+fourth permanent control for a setting most columns never use would crowd the
+one thing the header is for.

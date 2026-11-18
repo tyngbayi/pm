@@ -120,7 +120,10 @@ incoming update may omit them, and `replace_board` never writes them back.
 `board_update_error(board, member_ids)`
 validates referential integrity (each card referenced exactly once, `cards` keys
 matching card ids) and that every assignee is a member of that board, which it
-needs because `replace_board` would otherwise fail the foreign key mid-write. Columns
+needs because `replace_board` would otherwise fail the foreign key mid-write. A
+column carries `wipLimit`, which defaults to 0 in the Pydantic model so an AI
+reply that echoes an older board shape loses the limits rather than failing
+validation and losing the whole update. Columns
 may be added, removed, and reordered; `replace_board` rewrites the whole board and
 cards under a removed column cascade away. That rewrite drops every column, so the
 board's cards cascade and everything hanging off them goes too: `replace_board`
@@ -148,8 +151,14 @@ on that board so no card is left pointing at a name the board cannot render.
 `remove_board` must check ownership *before* the last-board rule, or a member who
 owns one board of their own gets a 409 for a shared board they could never delete.
 
-**Columns.** `PATCH /api/columns/{id}` renames one column and returns just that
-column. `POST /api/columns` (appends), `DELETE /api/columns/{id}` (cascades its
+**Columns.** `PATCH /api/columns/{id}` applies `title`, `wipLimit`, or both and
+returns just that column's settings. It is one route rather than two so a header
+that saves both fields produces one activity entry; `_column_change_summary`
+therefore has to describe either change or both. `wipLimit` is the number of
+cards the column should hold, 0 for no limit, and is **never enforced** — the
+API happily puts a column over, and only `KanbanColumn.tsx` flags it in red.
+Blocking the move would strand the card somewhere it is not.
+`POST /api/columns` (appends), `DELETE /api/columns/{id}` (cascades its
 cards), and `PATCH /api/columns/{id}/move` all reshape the board, so they return the
 whole `BoardData` and the frontend replaces its state with the response. Delete and
 move renumber the surviving columns through `_rewrite_positions`, which is shared

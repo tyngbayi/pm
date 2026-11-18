@@ -147,6 +147,14 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
             ON card_checklist_items (card_id);
         """,
     ),
+    (
+        8,
+        # 0 is "no limit": a nullable column would mean every read and every
+        # comparison had to handle None for a number that is never unknown.
+        """
+        ALTER TABLE columns ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -271,6 +279,16 @@ class ColumnRecord(TypedDict):
     id: str
     title: str
     cardIds: list[str]
+    # 0 means no limit. Going over is allowed and only flagged in the UI.
+    wipLimit: int
+
+
+class ColumnSummary(TypedDict):
+    """One column's own settings, without the cards sitting in it."""
+
+    id: str
+    title: str
+    wipLimit: int
 
 
 class BoardRecord(TypedDict):
@@ -804,7 +822,10 @@ def _board_data(
 ) -> BoardRecord:
     result: BoardRecord = {"columns": [], "cards": {}}
     columns = connection.execute(
-        "SELECT id, title FROM columns WHERE board_id = ? ORDER BY position",
+        """
+        SELECT id, title, wip_limit FROM columns
+        WHERE board_id = ? ORDER BY position
+        """,
         (board_id,),
     ).fetchall()
     for column in columns:
@@ -822,6 +843,7 @@ def _board_data(
                 "id": column["id"],
                 "title": column["title"],
                 "cardIds": [card["id"] for card in cards],
+                "wipLimit": column["wip_limit"],
             }
         )
         result["cards"].update({card["id"]: _card_data(card) for card in cards})
@@ -875,10 +897,16 @@ def replace_board(
         for column_position, column in enumerate(columns):
             connection.execute(
                 """
-                INSERT INTO columns (id, board_id, title, position)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO columns (id, board_id, title, position, wip_limit)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (column["id"], board_id, column["title"], column_position),
+                (
+                    column["id"],
+                    board_id,
+                    column["title"],
+                    column_position,
+                    column["wipLimit"],
+                ),
             )
             for card_position, card_id in enumerate(column["cardIds"]):
                 card = cards[card_id]
@@ -916,13 +944,47 @@ def replace_board(
         return _board_data(connection, board_id)
 
 
-def rename_column(
-    database_path: Path, user_id: str, column_id: str, title: str
-) -> bool:
+COLUMN_UPDATES = {"title": "title", "wipLimit": "wip_limit"}
+
+
+def _column_change_summary(
+    before: sqlite3.Row, changes: dict[str, object]
+) -> str:
+    """Describe a column edit for the activity log.
+
+    A rename and a limit change arrive on the same request, so the summary has
+    to cover either or both, and it names the old title because the row that
+    held it is about to be overwritten.
+    """
+    title = str(changes.get("title", before["title"]))
+    renamed = title != before["title"]
+    parts = []
+    if renamed:
+        parts.append(f'Renamed column "{before["title"]}" to "{title}"')
+    limit = changes.get("wipLimit", before["wip_limit"])
+    if limit != before["wip_limit"]:
+        if renamed:
+            # The rename clause has already named the column.
+            parts.append(
+                "cleared its limit" if limit == 0 else f"set its limit to {limit}"
+            )
+        elif limit == 0:
+            parts.append(f'Cleared the limit on column "{title}"')
+        else:
+            parts.append(f'Set column "{title}" to a limit of {limit}')
+    return " and ".join(parts) if parts else f'Edited column "{title}"'
+
+
+def update_column(
+    database_path: Path,
+    user_id: str,
+    column_id: str,
+    changes: dict[str, object],
+) -> ColumnSummary | None:
     with _connection(database_path) as connection:
         before = connection.execute(
             f"""
-            SELECT columns.board_id, columns.title
+            SELECT columns.board_id, columns.title, columns.wip_limit
             FROM columns
             WHERE columns.id = ?
               AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
@@ -930,17 +992,31 @@ def rename_column(
             (column_id, user_id, user_id),
         ).fetchone()
         if before is None:
-            return False
+            return None
+        fields = [field for field in COLUMN_UPDATES if field in changes]
         connection.execute(
-            "UPDATE columns SET title = ? WHERE id = ?", (title, column_id)
+            f"""
+            UPDATE columns
+            SET {", ".join(f"{COLUMN_UPDATES[field]} = ?" for field in fields)}
+            WHERE id = ?
+            """,
+            (*(changes[field] for field in fields), column_id),
         )
         _record(
             connection,
             before["board_id"],
             user_id,
-            f'Renamed column "{before["title"]}" to "{title}"',
+            _column_change_summary(before, changes),
         )
-        return True
+        updated = connection.execute(
+            "SELECT id, title, wip_limit FROM columns WHERE id = ?",
+            (column_id,),
+        ).fetchone()
+        return {
+            "id": updated["id"],
+            "title": updated["title"],
+            "wipLimit": updated["wip_limit"],
+        }
 
 
 def _accessible_column_board_id(

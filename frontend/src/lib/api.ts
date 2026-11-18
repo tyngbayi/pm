@@ -4,6 +4,7 @@ import type {
   BoardData,
   Card,
   ChecklistItem,
+  Column,
   Comment,
   Member,
 } from "@/lib/kanban";
@@ -39,8 +40,13 @@ export type BoardSummary = {
   owned: boolean;
 };
 type HealthStatus = { status: string };
-type ColumnUpdate = { id: string; title: string };
-export type CardChanges = Partial<Omit<Card, "id" | "commentCount">>;
+/** A column's own settings, without the cards sitting in it. */
+type ColumnSettings = Omit<Column, "cardIds">;
+export type ColumnChanges = Partial<Omit<ColumnSettings, "id">>;
+/** The API derives the three counts, so they are never sent back. */
+export type CardChanges = Partial<
+  Omit<Card, "id" | "commentCount" | "checklistDone" | "checklistTotal">
+>;
 export type AiChatMessage = { role: "user" | "assistant"; content: string };
 export type AiChatResponse = {
   message: string;
@@ -185,8 +191,11 @@ export const replaceBoard = (boardId: string, board: BoardData) =>
 const columnPath = (columnId: string) =>
   `/api/columns/${encodeURIComponent(columnId)}`;
 
-export const renameColumn = (columnId: string, title: string) =>
-  requestJson<ColumnUpdate>(columnPath(columnId), jsonRequest("PATCH", { title }));
+export const updateColumn = (columnId: string, changes: ColumnChanges) =>
+  requestJson<ColumnSettings>(
+    columnPath(columnId),
+    jsonRequest("PATCH", changes)
+  );
 
 export const createColumn = (boardId: string, title: string) =>
   requestJson<BoardData>(

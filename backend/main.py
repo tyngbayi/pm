@@ -28,6 +28,7 @@ from database import (
     BoardSummary,
     CardRecord,
     ChecklistItemRecord,
+    ColumnSummary,
     CommentRecord,
     UserRecord,
     add_board_member,
@@ -64,16 +65,19 @@ from database import (
     move_column,
     remove_board_member,
     rename_board,
-    rename_column,
     replace_board,
     set_checklist_item_done,
     update_card,
+    update_column,
     update_user,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_urlsafe(32)
 USERNAME_PATTERN = r"^[A-Za-z0-9_.-]+$"
+# A column limit is a working agreement, not a quota, so the cap is only here
+# to keep a typo out of the database.
+MAX_WIP_LIMIT = 99
 
 
 class LoginRequest(BaseModel):
@@ -148,6 +152,9 @@ class ColumnData(BaseModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     cardIds: list[str]
+    # 0 is no limit. Defaulted so a board update written before limits existed,
+    # or by an AI reply that ignores them, keeps working.
+    wipLimit: int = Field(default=0, ge=0, le=MAX_WIP_LIMIT)
 
 
 class BoardData(BaseModel):
@@ -185,8 +192,15 @@ class AiResponse(BaseModel):
     board_update: BoardData | None = None
 
 
-class RenameColumnRequest(BaseModel):
-    title: str = Field(min_length=1)
+class UpdateColumnRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1)
+    wipLimit: int | None = Field(default=None, ge=0, le=MAX_WIP_LIMIT)
+
+
+class ColumnSettings(BaseModel):
+    id: str
+    title: str
+    wipLimit: int
 
 
 class CreateColumnRequest(BaseModel):
@@ -660,18 +674,27 @@ def create_app(
             ) from exc
         return updated
 
-    @app.patch("/api/columns/{column_id}")
+    @app.patch("/api/columns/{column_id}", response_model=ColumnSettings)
     def patch_column(
         column_id: str,
-        payload: RenameColumnRequest,
+        payload: UpdateColumnRequest,
         user_id: str = Depends(require_database_user),
-    ) -> dict[str, str]:
-        title = payload.title.strip()
-        if not title:
-            raise HTTPException(status_code=422, detail="Column title cannot be empty")
-        if not rename_column(db_path, user_id, column_id, title):
+    ) -> ColumnSummary:
+        changes = payload.model_dump(exclude_unset=True)
+        if not changes or any(value is None for value in changes.values()):
+            raise HTTPException(
+                status_code=422, detail="Provide column fields to update"
+            )
+        if "title" in changes:
+            changes["title"] = changes["title"].strip()
+            if not changes["title"]:
+                raise HTTPException(
+                    status_code=422, detail="Column title cannot be empty"
+                )
+        column = update_column(db_path, user_id, column_id, changes)
+        if column is None:
             raise HTTPException(status_code=404, detail="Column not found")
-        return {"id": column_id, "title": title}
+        return column
 
     @app.post("/api/columns", response_model=BoardData, status_code=201)
     def post_column(

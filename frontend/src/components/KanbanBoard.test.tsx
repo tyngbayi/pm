@@ -35,11 +35,11 @@ const card = (
 
 const sampleBoard: BoardData = {
   columns: [
-    { id: "col-backlog", title: "Backlog", cardIds: ["card-1", "card-2"] },
-    { id: "col-discovery", title: "Discovery", cardIds: ["card-3"] },
-    { id: "col-progress", title: "In Progress", cardIds: ["card-4"] },
-    { id: "col-review", title: "Review", cardIds: ["card-5"] },
-    { id: "col-done", title: "Done", cardIds: ["card-6"] },
+    { id: "col-backlog", title: "Backlog", cardIds: ["card-1", "card-2"], wipLimit: 0 },
+    { id: "col-discovery", title: "Discovery", cardIds: ["card-3"], wipLimit: 0 },
+    { id: "col-progress", title: "In Progress", cardIds: ["card-4"], wipLimit: 0 },
+    { id: "col-review", title: "Review", cardIds: ["card-5"], wipLimit: 0 },
+    { id: "col-done", title: "Done", cardIds: ["card-6"], wipLimit: 0 },
   ],
   cards: {
     "card-1": card("card-1", "Align roadmap themes", "Plan the next release.", {
@@ -61,7 +61,7 @@ const sampleBoard: BoardData = {
 };
 
 const secondBoard: BoardData = {
-  columns: [{ id: "col-roadmap", title: "Roadmap", cardIds: ["card-9"] }],
+  columns: [{ id: "col-roadmap", title: "Roadmap", cardIds: ["card-9"], wipLimit: 0 }],
   cards: {
     "card-9": card("card-9", "Draft the pricing page", "Outline the tiers.", {
       assigneeId: "user-1",
@@ -190,9 +190,22 @@ describe("KanbanBoard", () => {
           ? jsonResponse(signedInUser)
           : jsonResponse({ detail: "Not authenticated" }, 401);
       }
-      if (path === "/api/columns/col-backlog" && method === "PATCH") {
-        const body = JSON.parse(String(init?.body)) as { title: string };
-        return jsonResponse({ id: "col-backlog", title: body.title });
+      if (
+        path.startsWith("/api/columns/") &&
+        !path.endsWith("/move") &&
+        method === "PATCH"
+      ) {
+        const id = path.slice("/api/columns/".length);
+        const current = sampleBoard.columns.find((column) => column.id === id);
+        const body = JSON.parse(String(init?.body)) as {
+          title?: string;
+          wipLimit?: number;
+        };
+        return jsonResponse({
+          id,
+          title: body.title ?? current?.title,
+          wipLimit: body.wipLimit ?? current?.wipLimit ?? 0,
+        });
       }
       if (path === "/api/columns" && method === "POST") {
         const body = JSON.parse(String(init?.body)) as { title: string };
@@ -201,7 +214,7 @@ describe("KanbanBoard", () => {
             ...sampleBoard,
             columns: [
               ...sampleBoard.columns,
-              { id: "col-new", title: body.title, cardIds: [] },
+              { id: "col-new", title: body.title, cardIds: [], wipLimit: 0 },
             ],
           },
           201
@@ -314,7 +327,7 @@ describe("KanbanBoard", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(sampleBoards));
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        columns: [{ id: "col-only", title: "Ideas", cardIds: ["card-9"] }],
+        columns: [{ id: "col-only", title: "Ideas", cardIds: ["card-9"], wipLimit: 0 }],
         cards: { "card-9": card("card-9", "Second board card", "") },
       })
     );
@@ -592,6 +605,50 @@ describe("KanbanBoard", () => {
         body: JSON.stringify({ title: "New Name" }),
       })
     );
+  });
+
+  it("sets a column limit and flags the column once it is over", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+
+    const column = await screen.findByTestId("column-col-backlog");
+    expect(within(column).getByLabelText("2 cards")).toBeInTheDocument();
+
+    await user.click(within(column).getByRole("button", { name: "Set Backlog limit" }));
+    const limit = within(column).getByRole("spinbutton", { name: "WIP limit" });
+    await user.clear(limit);
+    await user.type(limit, "1");
+    await user.tab();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/columns/col-backlog",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ wipLimit: 1 }),
+      })
+    );
+    // Backlog holds two cards, so one over a limit of one.
+    expect(
+      await within(column).findByLabelText("2 of 1 cards, over the limit")
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the column unflagged while it is within its limit", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+
+    const column = await screen.findByTestId("column-col-discovery");
+    await user.click(
+      within(column).getByRole("button", { name: "Set Discovery limit" })
+    );
+    const limit = within(column).getByRole("spinbutton", { name: "WIP limit" });
+    await user.clear(limit);
+    await user.type(limit, "4");
+    await user.tab();
+
+    expect(
+      await within(column).findByLabelText("1 of 4 cards")
+    ).toBeInTheDocument();
   });
 
   const columnTitles = () =>

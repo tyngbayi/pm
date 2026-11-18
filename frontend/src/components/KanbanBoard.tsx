@@ -41,10 +41,11 @@ import {
   moveCard as moveCardApi,
   moveColumn,
   renameBoard,
-  renameColumn,
   updateCard,
+  updateColumn,
   type BoardSummary,
   type CardChanges,
+  type ColumnChanges,
   type User,
 } from "@/lib/api";
 import {
@@ -182,18 +183,16 @@ export const KanbanBoard = () => {
     );
   };
 
-  const handleRenameColumn = (columnId: string, title: string) =>
+  const handleUpdateColumn = (columnId: string, changes: ColumnChanges) =>
     runMutation(
-      () => renameColumn(columnId, title),
-      ({ title: savedTitle }) => {
+      () => updateColumn(columnId, changes),
+      ({ id, ...saved }) => {
         setBoard((previous) =>
           previous
             ? {
                 ...previous,
                 columns: previous.columns.map((column) =>
-                  column.id === columnId
-                    ? { ...column, title: savedTitle }
-                    : column
+                  column.id === id ? { ...column, ...saved } : column
                 ),
               }
             : previous
@@ -556,7 +555,7 @@ export const KanbanBoard = () => {
                   disabled={isBoardBusy}
                   dragDisabled={isDragDisabled}
                   assigneeNames={assigneeNames}
-                  onRename={handleRenameColumn}
+                  onUpdate={handleUpdateColumn}
                   onMove={handleMoveColumn}
                   onDelete={handleDeleteColumn}
                   onAddCard={handleAddCard}

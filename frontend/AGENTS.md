@@ -71,6 +71,7 @@ tests/
   mywork.spec.ts      # Cross-board assigned-card panel e2e tests
   activity.spec.ts    # Board history panel e2e tests
   checklist.spec.ts   # Card checklist and board progress badge e2e tests
+  wip-limits.spec.ts  # Column WIP limit e2e tests
 ```
 
 ## Data model
@@ -90,7 +91,12 @@ type Card   = {
   checklistTotal: number   // derived by the API; never sent back
 }
 type ChecklistItem = { id: string; body: string; done: boolean }
-type Column = { id: string; title: string; cardIds: string[] }
+type Column = {
+  id: string
+  title: string
+  cardIds: string[]
+  wipLimit: number       // cards the column should hold; 0 for no limit
+}
 type BoardData = { columns: Column[]; cards: Record<string, Card> }
 type Member = { id: string; display_name: string }
 type Assignment = {
@@ -122,6 +128,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 ## Key behaviors
 
 - **Rename column**: inline `<input>` saves the new title on Enter or blur.
+- **Limit a column**: a gauge icon toggles a number input in the column header; 0 clears the limit. The card count then reads "N/M" and turns red once the column is over, but nothing stops a card going in — the limit is a prompt to a human, not a gate. Both fields go through one `updateColumn` call, so a rename and a limit change are one activity entry. The editor's draft is `null` while closed, so opening it always reseeds from the column.
 - **Manage columns**: `NewColumnForm` appends a column; per-column icon buttons move it left or right and delete it, which also removes its cards. Each of these returns the whole reshaped board, which replaces local state.
 - **Drag card**: @dnd-kit moves cards within or across columns; drop target highlights in accent yellow.
 - **Add card**: `NewCardForm` collects title (required) + details and sends them to the backend.
@@ -155,6 +162,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Persistent board**: on mount the app fetches `GET /api/boards` and then the active board; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
 - **Comments**: every card has a persisted thread, shared by everyone who can open the board, with a count badge on the card.
 - **Checklists**: every card has a persisted checklist of subtasks, tickable by everyone who can open the board, with a progress badge on the card.
+- **WIP limits**: every column has a persisted, advisory capacity, shown against its card count and flagged in red once exceeded.
 - **My work**: one cross-board view of the signed-in user's assigned cards, reachable from the board header.
 - **Board history**: the open board's recorded changes, with who made each one, reachable from the board header.
 - **AI chat**: authenticated sidebar conversation uses OpenRouter; structured responses can update and persist the board. Requests use the configured paid model.

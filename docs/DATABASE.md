@@ -4,7 +4,7 @@
 
 - **User**: an account identified by a unique username, holding a PBKDF2 password hash, a display name, and a role (`admin` or `member`).
 - **Board**: belongs to one user, who may own several, and may be shared with any number of other users. Each has an editable name.
-- **Column**: belongs to a board and has a stable order and editable title.
+- **Column**: belongs to a board and has a stable order, an editable title, and an optional WIP limit.
 - **Card**: belongs to one column and has a stable order, title, details, priority, due date, labels, and an optional assignee.
 - **Comment**: a line of discussion written by one user on one card, in a thread anyone who can open the board may read and add to.
 - **Checklist item**: one subtask of a card, with a body and a done flag, belonging to the card rather than to a person.
@@ -37,12 +37,14 @@ CREATE TABLE IF NOT EXISTS boards (
 
 CREATE INDEX boards_by_user ON boards (user_id);
 
+-- Extended by migration 8: wip_limit added. See "Migrations" below.
 CREATE TABLE IF NOT EXISTS columns (
-    id       TEXT PRIMARY KEY NOT NULL,
-    board_id TEXT NOT NULL
-             REFERENCES boards (id) ON DELETE CASCADE,
-    title    TEXT NOT NULL,
-    position INTEGER NOT NULL CHECK (position >= 0),
+    id        TEXT PRIMARY KEY NOT NULL,
+    board_id  TEXT NOT NULL
+              REFERENCES boards (id) ON DELETE CASCADE,
+    title     TEXT NOT NULL,
+    position  INTEGER NOT NULL CHECK (position >= 0),
+    wip_limit INTEGER NOT NULL DEFAULT 0,
     UNIQUE (board_id, position)
 );
 
@@ -115,6 +117,7 @@ CREATE INDEX card_checklist_by_card ON card_checklist_items (card_id);
 - A user owns any number of boards, listed in `created_at, name, id` order. Every account is seeded with one board at registration, and the API refuses to delete a user's last board so there is always something to show.
 - Each new board is initialized from the frontend seed: five columns and eight cards, with freshly generated ids so no two boards share a column or card. Columns can then be renamed, added, reordered, and deleted; deleting one cascades its cards away.
 - A column has ordered cards. `position` is zero-based; card moves and reordering must update affected positions in a transaction.
+- `columns.wip_limit` is the number of cards the column should hold at once, with 0 for no limit. It is never enforced: the API accepts a card that puts a column over, and only the UI flags it. A nullable column was rejected because the limit is never unknown, only absent, which zero already says. The API caps it at 99 to keep a typo out of the database.
 - `cards.priority` is `low`, `medium`, or `high`, and `cards.due_date` is an ISO `YYYY-MM-DD` string or empty for no deadline. Both are validated by the API, not by a `CHECK`, so the rule lives in one place alongside the rest of the request validation.
 - `cards.labels` is a JSON array of strings, since SQLite has no list type. Labels are free text owned by a card and are never queried across cards in SQL, so a join table would add work without buying anything. The API caps a card at 8 labels of 24 characters each.
 - `cards.assignee_id` is nullable and `ON DELETE SET NULL`, so deleting a user unassigns their cards on boards they do not own. Cards on their own boards cascade away with the user. The API rejects an assignee who is not a member of that card's board before writing, so the foreign key never fails mid-write.
@@ -175,6 +178,7 @@ Never edit a released migration; append a new one instead.
 | 5 | Add `card_comments` for per-card discussion threads |
 | 6 | Add `board_activity` for the per-board history of who changed what |
 | 7 | Add `card_checklist_items` for per-card subtask checklists |
+| 8 | Add `wip_limit` to `columns` for the advisory per-column capacity |
 
 A database migrated from v0 has no credentials for the seeded `user` account, so
 `initialize_database` backfills the demo password and promotes it to `admin`

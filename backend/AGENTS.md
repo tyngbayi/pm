@@ -5,7 +5,9 @@ persistence are in `database.py`, with password hashing in `security.py`. Accoun
 have an `admin` or `member` role and each owns any number of boards under
 `/api/boards`. An owner may share a board through
 `GET/POST/DELETE /api/boards/{id}/members`; members get the board's contents while
-renaming, deleting, and changing the roster stay owner-only. Cards carry a
+renaming, deleting, and changing the roster stay owner-only. A column carries an optional
+WIP limit, set through `PATCH /api/columns/{id}` alongside its title and never
+enforced: the API lets a column go over and only the UI flags it. Cards carry a
 priority, due date, labels, and an optional assignee, patched field by field
 through `/api/cards/{id}`, and an assignee must be a member of the card's board.
 `/api/boards/{id}/members` is the names-only roster behind the assignee picker,
