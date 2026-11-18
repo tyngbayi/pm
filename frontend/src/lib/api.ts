@@ -280,6 +280,13 @@ export const moveCard = (
     jsonRequest("PATCH", { column_id: columnId, position })
   );
 
+/** Returns the board the card left, which is the one still on screen. */
+export const moveCardToBoard = (cardId: string, boardId: string) =>
+  requestJson<BoardData>(
+    `${cardPath(cardId)}/board`,
+    jsonRequest("PATCH", { board_id: boardId })
+  );
+
 export const getAssignments = () =>
   requestJson<Assignment[]>("/api/assignments");
 

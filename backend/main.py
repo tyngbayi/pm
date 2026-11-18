@@ -62,6 +62,7 @@ from database import (
     list_checklist_items,
     list_users,
     move_card,
+    move_card_to_board,
     move_column,
     remove_board_member,
     rename_board,
@@ -235,6 +236,10 @@ NULLABLE_CARD_FIELDS = {"assigneeId"}
 class MoveCardRequest(BaseModel):
     column_id: str = Field(min_length=1)
     position: int = Field(ge=0)
+
+
+class MoveCardToBoardRequest(BaseModel):
+    board_id: str = Field(min_length=1)
 
 
 class CommentData(BaseModel):
@@ -804,6 +809,29 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="Card or destination column not found"
             )
+        return board
+
+    @app.patch("/api/cards/{card_id}/board", response_model=BoardData)
+    def patch_card_board(
+        card_id: str,
+        payload: MoveCardToBoardRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        destination = get_board(db_path, user_id, payload.board_id)
+        if destination is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        if not destination["columns"]:
+            raise HTTPException(
+                status_code=409,
+                detail="That board has no columns to hold the card",
+            )
+        if card_board_id(db_path, user_id, card_id) == payload.board_id:
+            raise HTTPException(
+                status_code=422, detail="The card is already on that board"
+            )
+        board = move_card_to_board(db_path, user_id, card_id, payload.board_id)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Card not found")
         return board
 
     @app.get(

@@ -758,3 +758,52 @@ The editor is a toggle behind a gauge icon rather than an always-visible
 input. A column header already carries a title field and three buttons; a
 fourth permanent control for a setting most columns never use would crowd the
 one thing the header is for.
+
+## Part 25: Moving a card to another board
+
+A card could be dragged anywhere on its own board but nowhere off it. Work that
+turned out to belong to a different project had to be retyped, losing its
+thread, its checklist, and its history.
+
+### Steps
+
+- [x] `move_card_to_board` moves a card to the end of the destination's first
+      column and compacts the column it left
+- [x] `PATCH /api/cards/{id}/board` takes a `board_id` and answers with the
+      board the card left
+- [x] A "Move to board" picker in the card dialog, listing the user's other
+      boards
+- [x] Both boards record the move in their own history
+
+### Success criteria
+
+- [x] A card moves with its comments and checklist intact
+- [x] An assignee who cannot open the destination is cleared
+- [x] A board the user cannot open is a 404; a board with no columns is a 409;
+      the card's own board is a 422
+- [x] Backend 215 tests / 99% coverage, frontend 65 unit tests, 36 Playwright
+      tests, green on a full run
+
+### Decisions
+
+The card keeps its id, so its comments and checklist travel with it for free
+and nothing has to be copied. The alternative -- create-and-delete -- would
+have meant rewriting every child row and silently dropping anything added
+later.
+
+The route returns the *source* board, not the destination. The card has left
+the board the user is looking at, so that is the state the screen needs; the
+destination is only read when they switch to it.
+
+An assignee who cannot open the destination is cleared, matching the rule
+`remove_board_member` already applies when someone loses access. Leaving the
+id would point the card at a name the destination board cannot render.
+
+The picker sits outside the dialog's form and acts on selection rather than
+waiting for "Save card". The move is a different kind of change from the
+fields above it -- it is already persisted by the time the dialog closes -- and
+folding it into the same submit would make one button do two unrelated writes.
+
+Both boards get an activity entry. The same event reads differently from each
+side ("to board X" / "in from board Y"), and each board's readers only ever
+see their own.

@@ -25,6 +25,7 @@ import {
   login,
   logout,
   moveCard,
+  moveCardToBoard,
   moveColumn,
   renameBoard,
   removeBoardMember,
@@ -87,6 +88,7 @@ describe("API client", () => {
     await addCardComment("card/id", "Looks good");
     await deleteCardComment("comment/id");
     await moveCard("card/id", "column-1", 2);
+    await moveCardToBoard("card/id", "board-1");
     await getChecklist("card/id");
     await addChecklistItem("card/id", "Draft the spec");
     await setChecklistItemDone("item/id", true);
@@ -124,6 +126,7 @@ describe("API client", () => {
       ["/api/cards/card%2Fid/comments", "POST"],
       ["/api/comments/comment%2Fid", "DELETE"],
       ["/api/cards/card%2Fid/move", "PATCH"],
+      ["/api/cards/card%2Fid/board", "PATCH"],
       ["/api/cards/card%2Fid/checklist", "GET"],
       ["/api/cards/card%2Fid/checklist", "POST"],
       ["/api/checklist/item%2Fid", "PATCH"],
@@ -142,6 +145,7 @@ describe("API client", () => {
     expect(bodyOf(16)).toEqual({ position: 1 });
     expect(bodyOf(21)).toEqual({ body: "Looks good" });
     expect(bodyOf(23)).toEqual({ column_id: "column-1", position: 2 });
+    expect(bodyOf(24)).toEqual({ board_id: "board-1" });
   });
 
   it("sends only the changed card fields", async () => {

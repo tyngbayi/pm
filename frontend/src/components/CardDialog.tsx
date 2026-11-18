@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { CardChecklist } from "@/components/CardChecklist";
 import { CardComments } from "@/components/CardComments";
-import type { CardChanges } from "@/lib/api";
+import type { BoardSummary, CardChanges } from "@/lib/api";
 import { PRIORITIES, type Card, type Member, type Priority } from "@/lib/kanban";
 
 type CardDialogProps = {
   card: Card;
   members: Member[];
+  otherBoards: BoardSummary[];
   currentUserId: string;
   disabled: boolean;
   onSave: (cardId: string, changes: CardChanges) => Promise<boolean>;
+  onMoveToBoard: (cardId: string, boardId: string) => Promise<boolean>;
   onCommentCountChange: (cardId: string, delta: number) => void;
   onChecklistChange: (cardId: string, done: number, total: number) => void;
   onClose: () => void;
@@ -33,9 +35,11 @@ export const parseLabels = (value: string): string[] => [
 export const CardDialog = ({
   card,
   members,
+  otherBoards,
   currentUserId,
   disabled,
   onSave,
+  onMoveToBoard,
   onCommentCountChange,
   onChecklistChange,
   onClose,
@@ -215,6 +219,29 @@ export const CardDialog = ({
           </button>
         </div>
         </form>
+
+        {/* Outside the form: picking a board acts at once rather than waiting
+            for "Save card", which only writes the fields above. */}
+        {otherBoards.length > 0 && (
+          <label className="flex flex-col gap-1.5">
+            <span className={label}>Move to board</span>
+            <select
+              value=""
+              disabled={disabled}
+              onChange={(event) =>
+                void onMoveToBoard(card.id, event.target.value)
+              }
+              className={field}
+            >
+              <option value="">Keep on this board</option>
+              {otherBoards.map((board) => (
+                <option key={board.id} value={board.id}>
+                  {board.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <CardChecklist
           cardId={card.id}

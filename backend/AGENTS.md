@@ -20,6 +20,12 @@ only the author may delete, and the card payload carries a derived
 which anyone who can open the board may add to, tick, and delete because the
 checklist belongs to the card rather than to one person; the card payload
 carries derived `checklistDone` and `checklistTotal`.
+`PATCH /api/cards/{id}/board` sends a card to the end of another accessible
+board's first column and answers with the board it left, since that is the one
+still on screen. The card keeps its id, so its comments and checklist travel
+with it, and an assignee who cannot open the destination is cleared. A board
+the user cannot open is a 404, a destination with no columns a 409, and the
+card's own board a 422; both boards record the move in their history.
 `GET /api/assignments` gathers every card assigned to the
 signed-in user across all the boards they can open, with the board name and
 column title on each, soonest due first and undated cards last. Every board

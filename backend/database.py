@@ -1341,6 +1341,88 @@ def move_card(
         return _board_data(connection, board_id)
 
 
+def move_card_to_board(
+    database_path: Path, user_id: str, card_id: str, board_id: str
+) -> BoardRecord | None:
+    """Move a card to the end of another board's first column.
+
+    Returns the board the card left, since that is the one still on screen.
+    The card keeps its id, so its comments and checklist travel with it, and
+    an assignee who cannot open the destination is cleared -- the same rule
+    `remove_board_member` applies when someone loses access.
+    """
+    with _connection(database_path) as connection:
+        card = connection.execute(
+            f"""
+            SELECT cards.column_id, cards.title, cards.assignee_id,
+                   columns.board_id
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            WHERE cards.id = ?
+              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
+            """,
+            (card_id, user_id, user_id),
+        ).fetchone()
+        destination = connection.execute(
+            f"""
+            SELECT columns.id, boards.name
+            FROM columns
+            JOIN boards ON boards.id = columns.board_id
+            WHERE columns.board_id = ?
+              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
+            ORDER BY columns.position
+            LIMIT 1
+            """,
+            (board_id, user_id, user_id),
+        ).fetchone()
+        if card is None or destination is None:
+            return None
+
+        assignee = card["assignee_id"]
+        if assignee is not None and assignee not in {
+            row["user_id"]
+            for row in connection.execute(BOARD_MEMBER_IDS, (board_id, board_id))
+        }:
+            assignee = None
+        position = connection.execute(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM cards WHERE column_id = ?",
+            (destination["id"],),
+        ).fetchone()[0]
+        connection.execute(
+            """
+            UPDATE cards SET column_id = ?, position = ?, assignee_id = ?
+            WHERE id = ?
+            """,
+            (destination["id"], position, assignee, card_id),
+        )
+        source_board_id = card["board_id"]
+        _rewrite_positions(
+            connection,
+            "cards",
+            "column_id",
+            card["column_id"],
+            _ordered_ids(connection, "cards", "column_id", card["column_id"]),
+        )
+        source_name = connection.execute(
+            "SELECT name FROM boards WHERE id = ?", (source_board_id,)
+        ).fetchone()["name"]
+        # Both histories: the card leaving one board and arriving on another
+        # are the same event, and each board's readers only see their own.
+        _record(
+            connection,
+            source_board_id,
+            user_id,
+            f'Moved card "{card["title"]}" to board "{destination["name"]}"',
+        )
+        _record(
+            connection,
+            board_id,
+            user_id,
+            f'Moved card "{card["title"]}" in from board "{source_name}"',
+        )
+        return _board_data(connection, source_board_id)
+
+
 COMMENT_FIELDS = """
     card_comments.id,
     card_comments.body,

@@ -173,6 +173,18 @@ unassign. An assignee must be a member of the card's board, checked through
 names-only roster that feeds the picker, readable by anyone who can open the board;
 `GET /api/users` stays admin-only because it exposes usernames and roles.
 
+**Moving a card off its board.** `PATCH /api/cards/{card_id}/board` takes a
+`board_id` and sends the card to the end of that board's first column. It returns
+the *source* board, since that is the one still on screen. The card keeps its id,
+so its comments and checklist travel with it; an assignee who is not a member of
+the destination is cleared, matching `remove_board_member`. The route separates
+its refusals: 404 for a board the user cannot open or a card they cannot reach,
+409 for a destination with no columns (a board may legitimately have zero), and
+422 for the board the card is already on. `move_card_to_board` writes to *both*
+boards' histories, worded from each side, and reads the roster through
+`BOARD_MEMBER_IDS` on the open connection rather than calling `board_member_ids`,
+which would nest a second connection inside the transaction.
+
 **Comments.** `GET/POST /api/cards/{id}/comments` and `DELETE /api/comments/{id}`.
 Anyone who can open the card's board may read and add; only the author may delete,
 and the refusal is a 404 so it does not confirm someone else's comment exists.
@@ -230,7 +242,10 @@ one accessible name make `getByRole` ambiguous in both test runners.
 `CardDialog.tsx` edits one card's fields. It is a `div` wrapping two sibling forms,
 not one form, because `CardComments.tsx` needs its own submit and nesting forms is
 invalid HTML; its header is sticky so the close button survives the thread making
-the dialog scroll. `CardComments.tsx` owns its own requests and reports a `+1`/`-1`
+the dialog scroll. Its "Move to board" picker sits *outside* that form and acts on
+selection: the move is already persisted, so folding it into "Save card" would
+make one button do two unrelated writes. The picker is hidden when the user has
+only one board. `CardComments.tsx` owns its own requests and reports a `+1`/`-1`
 delta up, so the card's badge stays in step without refetching the board.
 Pure reordering and filtering logic lives
 in `moveCard` and `filterBoard` in `frontend/src/lib/kanban.ts` and is unit tested

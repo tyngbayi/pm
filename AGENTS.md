@@ -44,6 +44,7 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 - Every card has a comment thread in its detail dialog, open to anyone who can see the board, with a comment count shown on the card.
 - A column can carry a WIP limit. The board shows the count against it and turns the column red once it is over, but never refuses the work.
 - Every card has a checklist of subtasks in its detail dialog, tickable by anyone who can see the board, with the done-of-total progress shown on the card.
+- A card can be moved to another of the user's boards from its detail dialog, taking its comments and checklist with it and leaving an entry in both boards' histories.
 - A "My work" panel in the header gathers every card assigned to the signed-in user across all their boards, soonest due first; selecting one opens that board and card.
 - A "Board history" panel in the header lists who changed what on the open board, newest first, so a shared board's members can see each other's edits.
 - The authenticated AI endpoints connect to OpenRouter using `OPENROUTER_API_KEY`; the sidebar can chat about the board and persist AI-proposed board updates.

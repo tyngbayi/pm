@@ -39,6 +39,7 @@ import {
   logout,
   removeBoardMember,
   moveCard as moveCardApi,
+  moveCardToBoard,
   moveColumn,
   renameBoard,
   updateCard,
@@ -306,6 +307,17 @@ export const KanbanBoard = () => {
               }
             : previous
         );
+      }
+    );
+
+  // The response is the board the card left, which is the one on screen; the
+  // dialog then has no card to show, so the editor closes with it.
+  const handleMoveCardToBoard = (cardId: string, boardId: string) =>
+    runMutation(
+      () => moveCardToBoard(cardId, boardId),
+      (source) => {
+        setBoard(source);
+        setEditingCardId(null);
       }
     );
 
@@ -612,9 +624,11 @@ export const KanbanBoard = () => {
         <CardDialog
           card={editingCard}
           members={members}
+          otherBoards={boards.filter((summary) => summary.id !== activeBoardId)}
           currentUserId={user.id}
           disabled={isBoardBusy}
           onSave={handleUpdateCard}
+          onMoveToBoard={handleMoveCardToBoard}
           onCommentCountChange={handleCommentCountChange}
           onChecklistChange={handleChecklistChange}
           onClose={() => setEditingCardId(null)}

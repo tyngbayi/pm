@@ -248,6 +248,20 @@ describe("KanbanBoard", () => {
       if (path === "/api/cards/card-new" && method === "DELETE") {
         return new Response(null, { status: 204 });
       }
+      if (path === "/api/cards/card-3/board" && method === "PATCH") {
+        // The API answers with the board the card left.
+        return jsonResponse({
+          columns: sampleBoard.columns.map((column) => ({
+            ...column,
+            cardIds: column.cardIds.filter((id) => id !== "card-3"),
+          })),
+          cards: Object.fromEntries(
+            Object.entries(sampleBoard.cards).filter(
+              ([id]) => id !== "card-3"
+            )
+          ),
+        });
+      }
       if (path === "/api/cards/card-3" && method === "PATCH") {
         const changes = JSON.parse(String(init?.body)) as Partial<Card>;
         return jsonResponse({ ...sampleBoard.cards["card-3"], ...changes });
@@ -803,6 +817,37 @@ describe("KanbanBoard", () => {
     expect(within(updated).getByText("2026-12-24")).toBeInTheDocument();
     expect(within(updated).getByText("Grace Hopper")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("moves a card to another board and closes the dialog", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Prototype analytics view");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Prototype analytics view" })
+    );
+    const dialog = screen.getByRole("dialog");
+    // Only the boards the card is not already on are offered.
+    const picker = within(dialog).getByLabelText("Move to board");
+    expect(
+      within(picker).queryByRole("option", { name: "My board" })
+    ).not.toBeInTheDocument();
+    await user.selectOptions(picker, "board-2");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cards/card-3/board",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ board_id: "board-2" }),
+      })
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    );
+    expect(
+      screen.queryByText("Prototype analytics view")
+    ).not.toBeInTheDocument();
   });
 
   it("shows a card's comment thread and adds to it", async () => {
