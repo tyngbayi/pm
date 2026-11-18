@@ -110,6 +110,34 @@ const activity = [
   },
 ];
 
+const archived = [
+  {
+    id: "card-1",
+    title: "Align roadmap themes",
+    column_title: "Backlog",
+    archived_at: "2026-01-03T11:45:00+00:00",
+  },
+];
+
+/** The API answers both archive and restore with the whole board. */
+const boardWithoutCard1 = (isArchived: boolean): BoardData => ({
+  ...sampleBoard,
+  columns: sampleBoard.columns.map((column) =>
+    column.id === "col-backlog"
+      ? {
+          ...column,
+          // Restoring lands the card at the foot of its column.
+          cardIds: isArchived ? ["card-2"] : ["card-2", "card-1"],
+        }
+      : column
+  ),
+  cards: isArchived
+    ? Object.fromEntries(
+        Object.entries(sampleBoard.cards).filter(([id]) => id !== "card-1")
+      )
+    : sampleBoard.cards,
+});
+
 const members = [
   { id: "user-1", display_name: "Ada Lovelace" },
   { id: "user-2", display_name: "Grace Hopper" },
@@ -184,6 +212,13 @@ describe("KanbanBoard", () => {
       }
       if (path.endsWith("/activity") && method === "GET") {
         return jsonResponse(activity);
+      }
+      if (path.endsWith("/archive") && method === "GET") {
+        return jsonResponse(archived);
+      }
+      if (path === "/api/cards/card-1/archived" && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as { archived: boolean };
+        return jsonResponse(boardWithoutCard1(body.archived));
       }
       if (path === "/api/auth/me" && method === "GET") {
         return signedInUser
@@ -1167,6 +1202,50 @@ describe("KanbanBoard", () => {
       "/api/boards/board-1/activity",
       expect.anything()
     );
+  });
+
+  it("archives a card off the board and lists it in the archive", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(
+      within(screen.getByTestId("card-card-1")).getByRole("button", {
+        name: "Archive Align roadmap themes",
+      })
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText("Align roadmap themes")).not.toBeInTheDocument()
+    );
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", { name: "Archive" });
+    expect(within(dialog).getByRole("listitem").textContent).toBe(
+      "Align roadmap themesBacklog \u00b7 2026-01-03 11:45"
+    );
+  });
+
+  it("restores a card from the archive to the foot of its column", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", { name: "Archive" });
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Restore Align roadmap themes",
+      })
+    );
+
+    await waitFor(() =>
+      expect(within(dialog).queryByRole("listitem")).not.toBeInTheDocument()
+    );
+    expect(
+      within(screen.getByTestId("column-col-backlog"))
+        .getAllByTestId(/card-card-/)
+        .map((element) => element.getAttribute("data-testid"))
+    ).toEqual(["card-card-2", "card-card-1"]);
   });
 
   it("shows API failures and allows retrying the initial load", async () => {

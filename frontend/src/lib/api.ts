@@ -47,6 +47,12 @@ export type ColumnChanges = Partial<Omit<ColumnSettings, "id">>;
 export type CardChanges = Partial<
   Omit<Card, "id" | "commentCount" | "checklistDone" | "checklistTotal">
 >;
+export type ArchivedCard = {
+  id: string;
+  title: string;
+  column_title: string;
+  archived_at: string;
+};
 export type AiChatMessage = { role: "user" | "assistant"; content: string };
 export type AiChatResponse = {
   message: string;
@@ -285,6 +291,17 @@ export const moveCardToBoard = (cardId: string, boardId: string) =>
   requestJson<BoardData>(
     `${cardPath(cardId)}/board`,
     jsonRequest("PATCH", { board_id: boardId })
+  );
+
+export const setCardArchived = (cardId: string, archived: boolean) =>
+  requestJson<BoardData>(
+    `${cardPath(cardId)}/archived`,
+    jsonRequest("PATCH", { archived })
+  );
+
+export const getBoardArchive = (boardId: string) =>
+  requestJson<ArchivedCard[]>(
+    `/api/boards/${encodeURIComponent(boardId)}/archive`
   );
 
 export const getAssignments = () =>

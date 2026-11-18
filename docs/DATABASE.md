@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS cards (
     labels   TEXT NOT NULL DEFAULT '[]',
     assignee_id TEXT
                 REFERENCES users (id) ON DELETE SET NULL,
+    archived_at TEXT NOT NULL DEFAULT '',
     UNIQUE (column_id, position)
 );
 
@@ -123,6 +124,7 @@ CREATE INDEX card_checklist_by_card ON card_checklist_items (card_id);
 - `cards.assignee_id` is nullable and `ON DELETE SET NULL`, so deleting a user unassigns their cards on boards they do not own. Cards on their own boards cascade away with the user. The API rejects an assignee who is not a member of that card's board before writing, so the foreign key never fails mid-write.
 - A board is reachable by its owner (`boards.user_id`) plus every row in `board_members`. The owner is deliberately not duplicated into `board_members`: a second source of truth would have to be kept in step, and every read unions the two anyway. Removing a membership row also clears `assignee_id` on that board's cards for that user, so no card points at someone who can no longer open it.
 - A card moves to another board by repointing `cards.column_id` at a column on that board; nothing else changes, so the card keeps its id and its comments and checklist travel with it. The column it left is renumbered, and an assignee who is not a member of the destination is cleared, the same rule a removed membership applies.
+- `cards.archived_at` is empty for a card on the board and an ISO UTC timestamp for one in the archive, so the one column is both the flag and the archive's sort key. An archived card stays in its column and keeps a `position`, but is always renumbered to the tail of it. That invariant is what lets every other reorder ignore the archive entirely: a position counted among the cards on screen is still a valid absolute position, because nothing archived sits in front of them. An archived card cascades away with its column or its board like any other.
 - Unique position constraints prevent ambiguous ordering within a board or column. Reordering code must avoid transient collisions while updating positions.
 - Deleting a user, board, or column cascades to its dependent rows. SQLite foreign-key enforcement must be enabled for each connection.
 - Passwords are stored only as PBKDF2-SHA256 hashes in the form
@@ -158,7 +160,7 @@ CREATE INDEX card_checklist_by_card ON card_checklist_items (card_id);
   delete one: a checklist is the card's content, not one person's speech, so
   unlike a comment it is not owned by its author and records no author at all.
 - A card's comment count is never stored, and neither are its checklist totals. All three are counted from `card_comments` and `card_checklist_items` in every card query, so they cannot drift from the rows they summarize.
-- A whole-board rewrite (`PUT /api/boards/{id}` and the AI sidebar) drops every column, so cards cascade and their comments and checklist items with them. `replace_board` holds both child tables aside and reinserts the rows whose card survives. Any future per-card child table must join that list or it will be silently erased on every rewrite.
+- A whole-board rewrite (`PUT /api/boards/{id}` and the AI sidebar) drops every column, so cards cascade and their comments and checklist items with them. `replace_board` holds both child tables aside and reinserts the rows whose card survives. Any future per-card child table must join that list or it will be silently erased on every rewrite. Archived cards need the same treatment for a different reason: they are absent from the payload because the client never saw them, so `replace_board` reads them aside too and puts each one back on the tail of its column, dropping any whose column the rewrite removed.
 
 ## Migrations
 
@@ -180,6 +182,7 @@ Never edit a released migration; append a new one instead.
 | 6 | Add `board_activity` for the per-board history of who changed what |
 | 7 | Add `card_checklist_items` for per-card subtask checklists |
 | 8 | Add `wip_limit` to `columns` for the advisory per-column capacity |
+| 9 | Add `archived_at` to `cards` for cards parked off the board |
 
 A database migrated from v0 has no credentials for the seeded `user` account, so
 `initialize_database` backfills the demo password and promotes it to `admin`

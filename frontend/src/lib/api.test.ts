@@ -16,6 +16,7 @@ import {
   getAssignments,
   getBoard,
   getBoardActivity,
+  getBoardArchive,
   getBoards,
   getCardComments,
   getChecklist,
@@ -30,6 +31,7 @@ import {
   renameBoard,
   removeBoardMember,
   replaceBoard,
+  setCardArchived,
   setChecklistItemDone,
   updateCard,
   updateColumn,
@@ -95,6 +97,8 @@ describe("API client", () => {
     await deleteChecklistItem("item/id");
     await getAssignments();
     await getBoardActivity("board/id");
+    await setCardArchived("card/id", true);
+    await getBoardArchive("board/id");
 
     expect(
       fetchMock.mock.calls.map(([url, init]) => [
@@ -133,6 +137,8 @@ describe("API client", () => {
       ["/api/checklist/item%2Fid", "DELETE"],
       ["/api/assignments", "GET"],
       ["/api/boards/board%2Fid/activity", "GET"],
+      ["/api/cards/card%2Fid/archived", "PATCH"],
+      ["/api/boards/board%2Fid/archive", "GET"],
     ]);
 
     const bodyOf = (index: number) =>
@@ -146,6 +152,7 @@ describe("API client", () => {
     expect(bodyOf(21)).toEqual({ body: "Looks good" });
     expect(bodyOf(23)).toEqual({ column_id: "column-1", position: 2 });
     expect(bodyOf(24)).toEqual({ board_id: "board-1" });
+    expect(bodyOf(31)).toEqual({ archived: true });
   });
 
   it("sends only the changed card fields", async () => {

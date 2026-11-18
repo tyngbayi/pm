@@ -35,7 +35,7 @@ src/
     BoardSwitcher.tsx # Board select plus create, rename, share, and delete controls
     ShareDialog.tsx   # Modal for a board's roster: add and remove members
     KanbanColumn.tsx  # Single column; droppable target; renders cards + NewCardForm
-    KanbanCard.tsx    # Single card; sortable drag handle; badges; edit/delete icons
+    KanbanCard.tsx    # Single card; sortable drag handle; badges; edit/archive/delete icons
     KanbanCardPreview.tsx  # Ghost card shown in DragOverlay while dragging
     CardDialog.tsx    # Modal for editing one card's fields plus its thread
     CardComments.tsx  # One card's comment thread: list, add, delete own
@@ -44,6 +44,7 @@ src/
     AiSidebar.tsx     # AI conversation UI and optional board update handling
     MyWorkDialog.tsx  # Cross-board list of the signed-in user's assigned cards
     ActivityDialog.tsx     # The open board's history of who changed what
+    ArchiveDialog.tsx      # The open board's archived cards, with restore
     NewCardForm.tsx   # Inline add-card form (toggle open/closed per column)
     NewColumnForm.tsx # Inline add-column form at the end of the board
     AuthGuard.tsx     # Redirects unauthenticated users to /login
@@ -67,6 +68,7 @@ tests/
   columns.spec.ts     # Column add, reorder, and delete e2e tests
   cards.spec.ts       # Card detail editing and board filtering e2e tests
   card-moves.spec.ts  # Moving a card to another board e2e tests
+  archive.spec.ts     # Archiving and restoring a card e2e tests
   sharing.spec.ts     # Board sharing, access, and revocation e2e tests
   comments.spec.ts    # Card comment thread and shared-board discussion e2e tests
   mywork.spec.ts      # Cross-board assigned-card panel e2e tests
@@ -138,6 +140,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Comment on a card**: the detail dialog carries a thread under the fields. Anyone who can open the board may read and add; the delete icon only appears on one's own comments. The card shows a count badge once the thread is non-empty. `CardComments` loads and writes its own comments and reports a `+1`/`-1` delta up, so the badge stays in step without refetching the board. The dialog is a `div` around two sibling forms, since nesting forms is invalid HTML, and its header is sticky so the close button stays reachable once the thread makes it scroll.
 - **Check off a subtask**: the detail dialog carries a `CardChecklist` section between the fields and the thread, with an "N of M done" badge. Anyone who can open the board may add, tick, and delete an item, since the checklist is the card's content rather than one person's. The card shows a done/total badge once the checklist is non-empty; `CardChecklist` reports absolute counts up rather than a delta like `CardComments`, because ticking moves only one of the two numbers. A box stays disabled until its `PATCH` returns, so there is no optimistic state to roll back — which is also why the e2e spec clicks it instead of using Playwright's `check()`.
 - **Move a card to another board**: the detail dialog carries a "Move to board" picker listing the user's other boards, hidden when there are none. It sits outside the dialog's form and acts on selection rather than on "Save card", because the move is persisted on its own. The API answers with the board the card left, so the board on screen is replaced with the response and the dialog closes with the card it was showing.
+- **Archive a card**: an archive icon on each card parks it off the board without deleting it; a header icon opens `ArchiveDialog`, which fetches `GET /api/boards/{id}/archive` on open and lists what is parked with its column and timestamp, newest first. Restoring puts the card back at the foot of the column it left. Both calls answer with the whole board, so the dialog only has to drop the restored row from its own list.
 - **Filter board**: `BoardFilters` narrows the board by free text (title, details, labels), assignee, and label. `filterBoard` keeps every column on screen so a match stays readable in context, and drag is paused while filtering because card positions are absolute.
 - **Switch board**: `BoardSwitcher` lists the boards a user can open and creates, renames, shares, or deletes them. Deletion is disabled while only one owned board remains.
 - **Share board**: a share icon opens `ShareDialog`, which adds a member by username and removes one by icon. A board owned by someone else is suffixed "(shared)" and hides the rename, share, and delete controls, matching the API, which answers 404 for all three.
@@ -166,6 +169,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Checklists**: every card has a persisted checklist of subtasks, tickable by everyone who can open the board, with a progress badge on the card.
 - **WIP limits**: every column has a persisted, advisory capacity, shown against its card count and flagged in red once exceeded.
 - **Cross-board moves**: a card can be sent to another of the user's boards from its detail dialog, keeping its comments, checklist, and history.
+- **Archive**: a card can be parked off the board instead of deleted, keeping its comments and checklist, and restored from the header's archive panel.
 - **My work**: one cross-board view of the signed-in user's assigned cards, reachable from the board header.
 - **Board history**: the open board's recorded changes, with who made each one, reachable from the board header.
 - **AI chat**: authenticated sidebar conversation uses OpenRouter; structured responses can update and persist the board. Requests use the configured paid model.

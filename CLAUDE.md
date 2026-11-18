@@ -185,6 +185,20 @@ boards' histories, worded from each side, and reads the roster through
 `BOARD_MEMBER_IDS` on the open connection rather than calling `board_member_ids`,
 which would nest a second connection inside the transaction.
 
+**Archiving.** `cards.archived_at` is empty for a card on the board and an ISO
+UTC timestamp for one in the archive, so one column is both the flag and the
+archive's sort key. `PATCH /api/cards/{id}/archived` toggles it and returns the
+reshaped board; `GET /api/boards/{id}/archive` lists what is parked. Archived
+cards stay in their column but `_reseat_column` always renumbers them behind the
+visible ones, which is the invariant that lets `move_card` and `_rewrite_positions`
+stay untouched: a drop index counted among the cards on screen is still the right
+absolute position. `_board_data` filters on `archived_at = ''`, so an archived card
+is simply absent from every board response — which is why `replace_board` must read
+the archive aside before its `DELETE FROM columns` and reinsert it on each column's
+tail, or every `PUT`, and so every AI board update, would erase it. A stale client
+that still shows a card archived since sends it back as visible; the visible copy
+wins rather than colliding on the primary key.
+
 **Comments.** `GET/POST /api/cards/{id}/comments` and `DELETE /api/comments/{id}`.
 Anyone who can open the card's board may read and add; only the author may delete,
 and the refusal is a 404 so it does not confirm someone else's comment exists.
@@ -247,6 +261,9 @@ selection: the move is already persisted, so folding it into "Save card" would
 make one button do two unrelated writes. The picker is hidden when the user has
 only one board. `CardComments.tsx` owns its own requests and reports a `+1`/`-1`
 delta up, so the card's badge stays in step without refetching the board.
+`ArchiveDialog.tsx` fetches the archive on open and drops a row locally once its
+restore resolves — the board behind it is replaced by the same response, so there
+is nothing else to reconcile.
 Pure reordering and filtering logic lives
 in `moveCard` and `filterBoard` in `frontend/src/lib/kanban.ts` and is unit tested
 separately from the component. `filterBoard` narrows cards but keeps every column,

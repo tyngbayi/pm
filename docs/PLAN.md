@@ -807,3 +807,49 @@ folding it into the same submit would make one button do two unrelated writes.
 Both boards get an activity entry. The same event reads differently from each
 side ("to board X" / "in from board Y"), and each board's readers only ever
 see their own.
+## Part 26 - Archiving a card
+
+Deleting a card is the only way to get it off the board, and it takes the
+card's thread, checklist, and history with it. Work that is parked rather than
+abandoned needs somewhere to go that is not the bin.
+
+### Steps
+
+- [x] `cards.archived_at` (migration 9): empty string on the board, a
+      timestamp in the archive
+- [x] `PATCH /api/cards/{id}/archived` archives or restores and answers with
+      the reshaped board
+- [x] `GET /api/boards/{id}/archive` lists what is parked, newest first
+- [x] An archive icon on every card and an Archive dialog in the header
+- [x] Archiving and restoring are recorded in the board's history
+
+### Success criteria
+
+- [x] An archived card leaves the board but keeps its comments and checklist
+- [x] Restoring puts the card at the foot of the column it was archived from
+- [x] An archived card survives a whole-board rewrite, including an AI update
+- [x] A card dropped at the end of a column still lands before the archive
+- [x] Backend 231 tests / 99% coverage, frontend 67 unit tests, 38 Playwright
+      tests, green on a full run
+
+### Decisions
+
+One column answers two questions. `archived_at` is both the flag and the
+archive's sort key, so there is no separate boolean to keep in step with it.
+An empty string rather than `NULL` keeps the column `NOT NULL` and the
+comparisons plain.
+
+Archived cards stay in their column and are always renumbered to its tail by
+`_reseat_column`. That invariant is what lets every existing reorder keep
+working unchanged: a drop index counted among the cards on screen is still a
+valid absolute index, because nothing archived sits in front of them.
+
+`replace_board` reads the archive aside before the rewrite and puts it back
+afterwards. Archived cards are not in the payload at all -- the client never
+saw them -- so without this every `PUT`, and so every AI board update, would
+erase the archive. A stale client that still shows a card archived since sends
+it back as visible; the visible copy wins rather than colliding on the id.
+
+Restoring is a second call to the same route rather than its own endpoint. It
+is one field with two values, and the board the caller gets back is the same
+shape either way.

@@ -25,6 +25,7 @@ type KanbanColumnProps = {
     details: string
   ) => Promise<boolean>;
   onEditCard: (cardId: string) => void;
+  onArchiveCard: (cardId: string) => Promise<boolean>;
   onDeleteCard: (columnId: string, cardId: string) => Promise<boolean>;
 };
 
@@ -47,6 +48,7 @@ export const KanbanColumn = ({
   onDelete,
   onAddCard,
   onEditCard,
+  onArchiveCard,
   onDeleteCard,
 }: KanbanColumnProps) => {
   const [titleDraft, setTitleDraft] = useState({
@@ -211,6 +213,7 @@ export const KanbanColumn = ({
               disabled={disabled}
               dragDisabled={dragDisabled}
               onEdit={onEditCard}
+              onArchive={onArchiveCard}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />
           ))}

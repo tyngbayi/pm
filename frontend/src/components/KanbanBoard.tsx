@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { History, ListChecks, LogOut, Sparkles, Users } from "lucide-react";
+import {
+  Archive,
+  History,
+  ListChecks,
+  LogOut,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -22,6 +29,7 @@ import { CardDialog } from "@/components/CardDialog";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { MyWorkDialog } from "@/components/MyWorkDialog";
 import { ActivityDialog } from "@/components/ActivityDialog";
+import { ArchiveDialog } from "@/components/ArchiveDialog";
 import { NewColumnForm } from "@/components/NewColumnForm";
 import { ShareDialog } from "@/components/ShareDialog";
 import {
@@ -42,6 +50,7 @@ import {
   moveCardToBoard,
   moveColumn,
   renameBoard,
+  setCardArchived,
   updateCard,
   updateColumn,
   type BoardSummary,
@@ -71,6 +80,7 @@ export const KanbanBoard = () => {
   const [isSharing, setIsSharing] = useState(false);
   const [isMyWorkOpen, setIsMyWorkOpen] = useState(false);
   const [isActivityOpen, setIsActivityOpen] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -310,6 +320,12 @@ export const KanbanBoard = () => {
       }
     );
 
+  const handleArchiveCard = (cardId: string) =>
+    runMutation(() => setCardArchived(cardId, true), setBoard);
+
+  const handleRestoreCard = (cardId: string) =>
+    runMutation(() => setCardArchived(cardId, false), setBoard);
+
   // The response is the board the card left, which is the one on screen; the
   // dialog then has no card to show, so the editor closes with it.
   const handleMoveCardToBoard = (cardId: string, boardId: string) =>
@@ -499,6 +515,14 @@ export const KanbanBoard = () => {
                 >
                   <History aria-hidden className="h-5 w-5" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setIsArchiveOpen(true)}
+                  aria-label="Archive"
+                  className="rounded-full border border-[var(--stroke)] p-2.5 text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                >
+                  <Archive aria-hidden className="h-5 w-5" />
+                </button>
                 {user?.role === "admin" && (
                   <Link
                     href="/admin"
@@ -572,6 +596,7 @@ export const KanbanBoard = () => {
                   onDelete={handleDeleteColumn}
                   onAddCard={handleAddCard}
                   onEditCard={setEditingCardId}
+                  onArchiveCard={handleArchiveCard}
                   onDeleteCard={handleDeleteCard}
                 />
               ))}
@@ -618,6 +643,14 @@ export const KanbanBoard = () => {
         <ActivityDialog
           boardId={activeBoardId}
           onClose={() => setIsActivityOpen(false)}
+        />
+      )}
+      {isArchiveOpen && activeBoardId && (
+        <ArchiveDialog
+          boardId={activeBoardId}
+          disabled={isBoardBusy}
+          onRestore={handleRestoreCard}
+          onClose={() => setIsArchiveOpen(false)}
         />
       )}
       {editingCard && user && (

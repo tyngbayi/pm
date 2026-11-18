@@ -155,6 +155,14 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE columns ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    (
+        9,
+        # An empty string is "on the board". A timestamp both marks the card
+        # archived and orders the archive, so one column answers both.
+        """
+        ALTER TABLE cards ADD COLUMN archived_at TEXT NOT NULL DEFAULT '';
+        """,
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -833,7 +841,7 @@ def _board_data(
             f"""
             SELECT {CARD_FIELDS}
             FROM cards
-            WHERE column_id = ?
+            WHERE column_id = ? AND archived_at = ''
             ORDER BY position
             """,
             (column["id"],),
@@ -891,6 +899,21 @@ def replace_board(
             ).fetchall()
             for table, fields in _CARD_CHILDREN.items()
         }
+        # Archived cards are not in `board_data` at all, since the board the
+        # caller edited never showed them. Without this they would be dropped
+        # by every rewrite, including every AI board update.
+        archived = connection.execute(
+            """
+            SELECT cards.id, cards.column_id, cards.title, cards.details,
+                   cards.priority, cards.due_date, cards.labels,
+                   cards.assignee_id, cards.archived_at
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            WHERE columns.board_id = ? AND cards.archived_at <> ''
+            ORDER BY cards.position
+            """,
+            (board_id,),
+        ).fetchall()
         connection.execute("DELETE FROM columns WHERE board_id = ?", (board_id,))
         columns = board_data["columns"]
         cards = board_data["cards"]
@@ -928,6 +951,38 @@ def replace_board(
                         card["assigneeId"],
                     ),
                 )
+        restored = set()
+        # Back onto the foot of their column, keeping the archive's invariant
+        # that archived cards sit after the visible ones. A card whose column
+        # the rewrite removed goes with it, like any other card there.
+        tails = {column["id"]: len(column["cardIds"]) for column in columns}
+        for card in archived:
+            # A stale client can send back a board that still shows a card
+            # archived since; the visible copy wins rather than colliding.
+            if card["column_id"] not in tails or card["id"] in cards:
+                continue
+            connection.execute(
+                """
+                INSERT INTO cards (id, column_id, title, details, position,
+                                   priority, due_date, labels, assignee_id,
+                                   archived_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    card["id"],
+                    card["column_id"],
+                    card["title"],
+                    card["details"],
+                    tails[card["column_id"]],
+                    card["priority"],
+                    card["due_date"],
+                    card["labels"],
+                    card["assignee_id"],
+                    card["archived_at"],
+                ),
+            )
+            tails[card["column_id"]] += 1
+            restored.add(card["id"])
         for table, fields in _CARD_CHILDREN.items():
             connection.executemany(
                 f"""
@@ -937,7 +992,7 @@ def replace_board(
                 [
                     tuple(row)
                     for row in saved[table]
-                    if row["card_id"] in cards
+                    if row["card_id"] in cards or row["card_id"] in restored
                 ],
             )
         _record(connection, board_id, user_id, "Rewrote the whole board")
@@ -1235,6 +1290,31 @@ def _ordered_ids(
     ]
 
 
+def _reseat_column(connection: sqlite3.Connection, column_id: str) -> None:
+    """Renumber a column so its archived cards sit after the visible ones.
+
+    Everything else reorders by position alone, so this invariant is what lets
+    a drop index counted among the cards on screen address the right slot.
+    """
+    _rewrite_positions(
+        connection,
+        "cards",
+        "column_id",
+        column_id,
+        [
+            row["id"]
+            for row in connection.execute(
+                """
+                SELECT id FROM cards
+                WHERE column_id = ?
+                ORDER BY archived_at <> '', position
+                """,
+                (column_id,),
+            )
+        ],
+    )
+
+
 def delete_card(database_path: Path, user_id: str, card_id: str) -> bool:
     with _connection(database_path) as connection:
         row = connection.execute(
@@ -1396,13 +1476,10 @@ def move_card_to_board(
             (destination["id"], position, assignee, card_id),
         )
         source_board_id = card["board_id"]
-        _rewrite_positions(
-            connection,
-            "cards",
-            "column_id",
-            card["column_id"],
-            _ordered_ids(connection, "cards", "column_id", card["column_id"]),
-        )
+        _reseat_column(connection, card["column_id"])
+        # MAX + 1 above lands past anything archived in the destination, so it
+        # is reseated too rather than left behind the archive.
+        _reseat_column(connection, destination["id"])
         source_name = connection.execute(
             "SELECT name FROM boards WHERE id = ?", (source_board_id,)
         ).fetchone()["name"]
@@ -1421,6 +1498,71 @@ def move_card_to_board(
             f'Moved card "{card["title"]}" in from board "{source_name}"',
         )
         return _board_data(connection, source_board_id)
+
+
+class ArchivedCard(TypedDict):
+    id: str
+    title: str
+    column_title: str
+    archived_at: str
+
+
+def set_card_archived(
+    database_path: Path, user_id: str, card_id: str, archived: bool
+) -> BoardRecord | None:
+    """Take a card off the board, or put it back at the foot of its column."""
+    with _connection(database_path) as connection:
+        card = connection.execute(
+            f"""
+            SELECT cards.column_id, cards.title, columns.board_id
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            WHERE cards.id = ?
+              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
+            """,
+            (card_id, user_id, user_id),
+        ).fetchone()
+        if card is None:
+            return None
+        connection.execute(
+            "UPDATE cards SET archived_at = ? WHERE id = ?",
+            (_now() if archived else "", card_id),
+        )
+        _reseat_column(connection, card["column_id"])
+        _record(
+            connection,
+            card["board_id"],
+            user_id,
+            f'{"Archived" if archived else "Restored"} card "{card["title"]}"',
+        )
+        return _board_data(connection, card["board_id"])
+
+
+def list_archived_cards(
+    database_path: Path, user_id: str, board_id: str
+) -> list[ArchivedCard] | None:
+    with _connection(database_path) as connection:
+        if _accessible_board_id(connection, user_id, board_id) is None:
+            return None
+        return [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "column_title": row["column_title"],
+                "archived_at": row["archived_at"],
+            }
+            for row in connection.execute(
+                """
+                SELECT cards.id, cards.title, cards.archived_at,
+                       columns.title AS column_title
+                FROM cards
+                JOIN columns ON columns.id = cards.column_id
+                WHERE columns.board_id = ? AND cards.archived_at <> ''
+                ORDER BY cards.archived_at DESC, cards.rowid DESC
+                """,
+                (board_id,),
+            )
+        ]
 
 
 COMMENT_FIELDS = """

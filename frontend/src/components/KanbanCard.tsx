@@ -2,6 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import {
+  Archive,
   CalendarDays,
   ListChecks,
   MessageSquare,
@@ -17,6 +18,7 @@ type KanbanCardProps = {
   disabled: boolean;
   dragDisabled: boolean;
   onEdit: (cardId: string) => void;
+  onArchive: (cardId: string) => Promise<boolean>;
   onDelete: (cardId: string) => Promise<boolean>;
 };
 
@@ -39,6 +41,7 @@ export const KanbanCard = ({
   disabled,
   dragDisabled,
   onEdit,
+  onArchive,
   onDelete,
 }: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -80,6 +83,15 @@ export const KanbanCard = ({
             aria-label={`Edit ${card.title}`}
           >
             <Pencil aria-hidden className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void onArchive(card.id)}
+            disabled={disabled}
+            className={`${cardButton} hover:text-[var(--secondary-purple)]`}
+            aria-label={`Archive ${card.title}`}
+          >
+            <Archive aria-hidden className="h-4 w-4" />
           </button>
           <button
             type="button"

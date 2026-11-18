@@ -26,6 +26,12 @@ still on screen. The card keeps its id, so its comments and checklist travel
 with it, and an assignee who cannot open the destination is cleared. A board
 the user cannot open is a 404, a destination with no columns a 409, and the
 card's own board a 422; both boards record the move in their history.
+`PATCH /api/cards/{id}/archived` parks a card off the board or puts it back at
+the foot of the column it left, answering with the reshaped board, and
+`GET /api/boards/{id}/archive` lists what is parked, newest first. An archived
+card keeps everything hanging off it and is simply absent from every board
+response; `replace_board` preserves it across a whole-board rewrite, so an AI
+update cannot erase the archive.
 `GET /api/assignments` gathers every card assigned to the
 signed-in user across all the boards they can open, with the board name and
 column title on each, soonest due first and undated cards last. Every board

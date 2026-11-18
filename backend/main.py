@@ -23,6 +23,7 @@ from ai import (
 )
 from database import (
     ActivityRecord,
+    ArchivedCard,
     AssignmentRecord,
     BoardRecord,
     BoardSummary,
@@ -54,6 +55,7 @@ from database import (
     get_user,
     get_user_by_username,
     initialize_database,
+    list_archived_cards,
     list_assignments,
     list_board_activity,
     list_board_members,
@@ -67,6 +69,7 @@ from database import (
     remove_board_member,
     rename_board,
     replace_board,
+    set_card_archived,
     set_checklist_item_done,
     update_card,
     update_column,
@@ -240,6 +243,17 @@ class MoveCardRequest(BaseModel):
 
 class MoveCardToBoardRequest(BaseModel):
     board_id: str = Field(min_length=1)
+
+
+class ArchiveCardRequest(BaseModel):
+    archived: bool
+
+
+class ArchivedCardData(BaseModel):
+    id: str
+    title: str
+    column_title: str
+    archived_at: str
 
 
 class CommentData(BaseModel):
@@ -834,6 +848,17 @@ def create_app(
             raise HTTPException(status_code=404, detail="Card not found")
         return board
 
+    @app.patch("/api/cards/{card_id}/archived", response_model=BoardData)
+    def patch_card_archived(
+        card_id: str,
+        payload: ArchiveCardRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        board = set_card_archived(db_path, user_id, card_id, payload.archived)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return board
+
     @app.get(
         "/api/cards/{card_id}/comments", response_model=list[CommentData]
     )
@@ -932,6 +957,17 @@ def create_app(
         if activity is None:
             raise HTTPException(status_code=404, detail="Board not found")
         return activity
+
+    @app.get(
+        "/api/boards/{board_id}/archive", response_model=list[ArchivedCardData]
+    )
+    def read_board_archive(
+        board_id: str, user_id: str = Depends(require_database_user)
+    ) -> list[ArchivedCard]:
+        archived = list_archived_cards(db_path, user_id, board_id)
+        if archived is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return archived
 
     @app.get("/api/assignments", response_model=list[AssignmentData])
     def read_assignments(
