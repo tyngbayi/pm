@@ -13,7 +13,12 @@ readable by anyone who can open that board, while `/api/users` stays admin-only.
 Each card has a comment thread under `GET/POST /api/cards/{id}/comments` and
 `DELETE /api/comments/{id}`: anyone who can open the board may read and add,
 only the author may delete, and the card payload carries a derived
-`commentCount`. `GET /api/assignments` gathers every card assigned to the
+`commentCount`. A card also has a checklist under
+`GET/POST /api/cards/{id}/checklist` and `PATCH/DELETE /api/checklist/{id}`,
+which anyone who can open the board may add to, tick, and delete because the
+checklist belongs to the card rather than to one person; the card payload
+carries derived `checklistDone` and `checklistTotal`.
+`GET /api/assignments` gathers every card assigned to the
 signed-in user across all the boards they can open, with the board name and
 column title on each, soonest due first and undated cards last. Every board
 change is recorded in `board_activity` and read back newest first by

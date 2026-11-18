@@ -27,6 +27,7 @@ from database import (
     BoardRecord,
     BoardSummary,
     CardRecord,
+    ChecklistItemRecord,
     CommentRecord,
     UserRecord,
     add_board_member,
@@ -39,11 +40,13 @@ from database import (
     create_board,
     create_card,
     create_card_comment,
+    create_checklist_item,
     create_column,
     create_user,
     delete_board,
     delete_card,
     delete_card_comment,
+    delete_checklist_item,
     delete_column,
     delete_user,
     get_board,
@@ -55,6 +58,7 @@ from database import (
     list_board_members,
     list_boards,
     list_card_comments,
+    list_checklist_items,
     list_users,
     move_card,
     move_column,
@@ -62,6 +66,7 @@ from database import (
     rename_board,
     rename_column,
     replace_board,
+    set_checklist_item_done,
     update_card,
     update_user,
 )
@@ -131,9 +136,12 @@ class CardData(BaseModel):
     dueDate: DueDate = ""
     labels: Labels = []
     assigneeId: str | None = None
-    # Counted from the comment thread rather than stored on the card, so an
-    # incoming board update may omit it and never writes it back.
+    # Counted from the thread and the checklist rather than stored on the
+    # card, so an incoming board update may omit these and never writes them
+    # back.
     commentCount: int = 0
+    checklistDone: int = 0
+    checklistTotal: int = 0
 
 
 class ColumnData(BaseModel):
@@ -225,6 +233,20 @@ class CommentData(BaseModel):
 
 class CreateCommentRequest(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+class ChecklistItemData(BaseModel):
+    id: str
+    body: str
+    done: bool
+
+
+class CreateChecklistItemRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=200)
+
+
+class SetChecklistItemRequest(BaseModel):
+    done: bool
 
 
 class ActivityData(BaseModel):
@@ -797,6 +819,56 @@ def create_app(
         # confirm it exists, so it reads the same as a missing one.
         if not delete_card_comment(db_path, user_id, comment_id):
             raise HTTPException(status_code=404, detail="Comment not found")
+        return Response(status_code=204)
+
+    @app.get(
+        "/api/cards/{card_id}/checklist",
+        response_model=list[ChecklistItemData],
+    )
+    def read_checklist(
+        card_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> list[ChecklistItemRecord]:
+        items = list_checklist_items(db_path, user_id, card_id)
+        if items is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return items
+
+    @app.post(
+        "/api/cards/{card_id}/checklist",
+        response_model=ChecklistItemData,
+        status_code=201,
+    )
+    def add_checklist_item(
+        card_id: str,
+        payload: CreateChecklistItemRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> ChecklistItemRecord:
+        item = create_checklist_item(db_path, user_id, card_id, payload.body)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return item
+
+    @app.patch(
+        "/api/checklist/{item_id}", response_model=ChecklistItemData
+    )
+    def update_checklist_item(
+        item_id: str,
+        payload: SetChecklistItemRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> ChecklistItemRecord:
+        item = set_checklist_item_done(db_path, user_id, item_id, payload.done)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return item
+
+    @app.delete("/api/checklist/{item_id}", status_code=204)
+    def remove_checklist_item(
+        item_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> Response:
+        if not delete_checklist_item(db_path, user_id, item_id):
+            raise HTTPException(status_code=404, detail="Item not found")
         return Response(status_code=204)
 
     @app.get(

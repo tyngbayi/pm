@@ -39,6 +39,7 @@ src/
     KanbanCardPreview.tsx  # Ghost card shown in DragOverlay while dragging
     CardDialog.tsx    # Modal for editing one card's fields plus its thread
     CardComments.tsx  # One card's comment thread: list, add, delete own
+    CardChecklist.tsx # One card's subtasks: list, add, tick, delete
     BoardFilters.tsx  # Search box plus assignee and label filters
     AiSidebar.tsx     # AI conversation UI and optional board update handling
     MyWorkDialog.tsx  # Cross-board list of the signed-in user's assigned cards
@@ -69,6 +70,7 @@ tests/
   comments.spec.ts    # Card comment thread and shared-board discussion e2e tests
   mywork.spec.ts      # Cross-board assigned-card panel e2e tests
   activity.spec.ts    # Board history panel e2e tests
+  checklist.spec.ts   # Card checklist and board progress badge e2e tests
 ```
 
 ## Data model
@@ -84,7 +86,10 @@ type Card   = {
   labels: string[]
   assigneeId: string | null
   commentCount: number     // derived by the API; never sent back
+  checklistDone: number    // derived by the API; never sent back
+  checklistTotal: number   // derived by the API; never sent back
 }
+type ChecklistItem = { id: string; body: string; done: boolean }
 type Column = { id: string; title: string; cardIds: string[] }
 type BoardData = { columns: Column[]; cards: Record<string, Card> }
 type Member = { id: string; display_name: string }
@@ -123,6 +128,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Delete card**: an icon button on each card deletes it through the backend. Icon-only controls carry an `aria-label` and hide the SVG with `aria-hidden`, so they stay reachable by accessible name.
 - **Edit card**: a pencil icon opens `CardDialog`, which edits title, details, priority, due date, assignee, and comma-separated labels in one `PATCH`. The card shows a priority pill, the due date (red once overdue), the assignee name, and a label pill each. The assignee picker is filled from `GET /api/boards/{id}/members`, reloaded with the board and failing quietly so a missing roster cannot break it.
 - **Comment on a card**: the detail dialog carries a thread under the fields. Anyone who can open the board may read and add; the delete icon only appears on one's own comments. The card shows a count badge once the thread is non-empty. `CardComments` loads and writes its own comments and reports a `+1`/`-1` delta up, so the badge stays in step without refetching the board. The dialog is a `div` around two sibling forms, since nesting forms is invalid HTML, and its header is sticky so the close button stays reachable once the thread makes it scroll.
+- **Check off a subtask**: the detail dialog carries a `CardChecklist` section between the fields and the thread, with an "N of M done" badge. Anyone who can open the board may add, tick, and delete an item, since the checklist is the card's content rather than one person's. The card shows a done/total badge once the checklist is non-empty; `CardChecklist` reports absolute counts up rather than a delta like `CardComments`, because ticking moves only one of the two numbers. A box stays disabled until its `PATCH` returns, so there is no optimistic state to roll back — which is also why the e2e spec clicks it instead of using Playwright's `check()`.
 - **Filter board**: `BoardFilters` narrows the board by free text (title, details, labels), assignee, and label. `filterBoard` keeps every column on screen so a match stays readable in context, and drag is paused while filtering because card positions are absolute.
 - **Switch board**: `BoardSwitcher` lists the boards a user can open and creates, renames, shares, or deletes them. Deletion is disabled while only one owned board remains.
 - **Share board**: a share icon opens `ShareDialog`, which adds a member by username and removes one by icon. A board owned by someone else is suffixed "(shared)" and hides the rename, share, and delete controls, matching the API, which answers 404 for all three.
@@ -148,6 +154,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Accounts**: `/admin` lists every account and lets admins create them, change roles, and delete them. The route relies on the API's 403, not on client-side gating.
 - **Persistent board**: on mount the app fetches `GET /api/boards` and then the active board; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
 - **Comments**: every card has a persisted thread, shared by everyone who can open the board, with a count badge on the card.
+- **Checklists**: every card has a persisted checklist of subtasks, tickable by everyone who can open the board, with a progress badge on the card.
 - **My work**: one cross-board view of the signed-in user's assigned cards, reachable from the board header.
 - **Board history**: the open board's recorded changes, with who made each one, reachable from the board header.
 - **AI chat**: authenticated sidebar conversation uses OpenRouter; structured responses can update and persist the board. Requests use the configured paid model.

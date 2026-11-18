@@ -264,6 +264,25 @@ export const KanbanBoard = () => {
       };
     });
 
+  const handleChecklistChange = (
+    cardId: string,
+    done: number,
+    total: number
+  ) =>
+    setBoard((previous) => {
+      const card = previous?.cards[cardId];
+      if (!previous || !card) {
+        return previous;
+      }
+      return {
+        ...previous,
+        cards: {
+          ...previous.cards,
+          [cardId]: { ...card, checklistDone: done, checklistTotal: total },
+        },
+      };
+    });
+
   const handleDeleteCard = (columnId: string, cardId: string) =>
     runMutation(
       () => deleteCard(cardId),
@@ -598,6 +617,7 @@ export const KanbanBoard = () => {
           disabled={isBoardBusy}
           onSave={handleUpdateCard}
           onCommentCountChange={handleCommentCountChange}
+          onChecklistChange={handleChecklistChange}
           onClose={() => setEditingCardId(null)}
         />
       )}

@@ -3,6 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import {
   CalendarDays,
+  ListChecks,
   MessageSquare,
   Pencil,
   Trash2,
@@ -129,6 +130,15 @@ export const KanbanCard = ({
           >
             <MessageSquare aria-hidden className="h-3.5 w-3.5" />
             {card.commentCount}
+          </span>
+        )}
+        {card.checklistTotal > 0 && (
+          <span
+            className="inline-flex items-center gap-1.5 text-[var(--gray-text)]"
+            aria-label={`${card.checklistDone} of ${card.checklistTotal} checklist items done`}
+          >
+            <ListChecks aria-hidden className="h-3.5 w-3.5" />
+            {card.checklistDone}/{card.checklistTotal}
           </span>
         )}
         {card.labels.map((cardLabel) => (

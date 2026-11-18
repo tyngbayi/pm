@@ -28,6 +28,8 @@ const card = (
   labels: [],
   assigneeId: null,
   commentCount: 0,
+  checklistDone: 0,
+  checklistTotal: 0,
   ...extra,
 });
 
@@ -86,6 +88,11 @@ const assignments = [
     board_name: "My board",
     column_title: "Backlog",
   },
+];
+
+const checklist = [
+  { id: "item-1", body: "Draft the spec", done: true },
+  { id: "item-2", body: "Review it", done: false },
 ];
 
 const activity = [
@@ -250,6 +257,17 @@ describe("KanbanBoard", () => {
       }
       if (path.startsWith("/api/comments/") && method === "DELETE") {
         return new Response(null, { status: 204 });
+      }
+      if (path.endsWith("/checklist") && method === "GET") {
+        return jsonResponse(checklist);
+      }
+      if (path.endsWith("/checklist") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { body: string };
+        return jsonResponse({ id: "item-3", body: body.body, done: false }, 201);
+      }
+      if (path.startsWith("/api/checklist/") && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as { done: boolean };
+        return jsonResponse({ ...checklist[1], done: body.done });
       }
       return jsonResponse({ detail: "Unexpected API request" }, 404);
     });
@@ -833,6 +851,69 @@ describe("KanbanBoard", () => {
     await waitFor(() =>
       expect(within(dialog).queryByText("Mine")).not.toBeInTheDocument()
     );
+  });
+
+  it("adds a checklist item and shows the card's progress", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Prototype analytics view");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Prototype analytics view" })
+    );
+    const dialog = screen.getByRole("dialog");
+    const section = within(dialog).getByRole("region", { name: "Checklist" });
+    await within(section).findByText("Draft the spec");
+    expect(within(section).getByText("1 of 2 done")).toBeInTheDocument();
+
+    await user.type(
+      within(section).getByLabelText("New checklist item"),
+      "Ship it"
+    );
+    await user.click(within(section).getByRole("button", { name: "Add item" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cards/card-3/checklist",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ body: "Ship it" }),
+      })
+    );
+    expect(within(section).getByText("1 of 3 done")).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close card details" })
+    );
+    expect(
+      within(screen.getByTestId("card-card-3")).getByLabelText(
+        "1 of 3 checklist items done"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("ticks a checklist item", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Prototype analytics view");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Prototype analytics view" })
+    );
+    const section = within(screen.getByRole("dialog")).getByRole("region", {
+      name: "Checklist",
+    });
+    await within(section).findByText("Review it");
+
+    await user.click(within(section).getByRole("checkbox", { checked: false }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/checklist/item-2",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ done: true }),
+      })
+    );
+    expect(await within(section).findByText("2 of 2 done")).toBeInTheDocument();
   });
 
   it("closes the detail dialog without saving", async () => {

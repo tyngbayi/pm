@@ -133,6 +133,20 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         CREATE INDEX board_activity_by_board ON board_activity (board_id);
         """,
     ),
+    (
+        7,
+        """
+        CREATE TABLE card_checklist_items (
+            id TEXT PRIMARY KEY NOT NULL,
+            card_id TEXT NOT NULL
+                    REFERENCES cards (id) ON DELETE CASCADE,
+            body TEXT NOT NULL,
+            done INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX card_checklist_by_card
+            ON card_checklist_items (card_id);
+        """,
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -211,9 +225,17 @@ class CardRecord(TypedDict):
     dueDate: str
     assigneeId: str | None
     labels: list[str]
-    # Derived from `card_comments`, so it is read-only: `replace_board` never
-    # writes it back.
+    # Derived from `card_comments` and `card_checklist_items`, so these are
+    # read-only: `replace_board` never writes them back.
     commentCount: int
+    checklistDone: int
+    checklistTotal: int
+
+
+class ChecklistItemRecord(TypedDict):
+    id: str
+    body: str
+    done: bool
 
 
 class CommentRecord(TypedDict):
@@ -743,7 +765,11 @@ CARD_FIELDS = (
     "cards.id, cards.title, cards.details, cards.priority, cards.due_date, "
     "cards.labels, cards.assignee_id, "
     "(SELECT COUNT(*) FROM card_comments WHERE card_id = cards.id)"
-    " AS comment_count"
+    " AS comment_count, "
+    "(SELECT COUNT(*) FROM card_checklist_items WHERE card_id = cards.id)"
+    " AS checklist_total, "
+    "(SELECT COUNT(*) FROM card_checklist_items"
+    " WHERE card_id = cards.id AND done = 1) AS checklist_done"
 )
 
 # JSON card fields mapped to their database column. `labels` is stored as a
@@ -768,6 +794,8 @@ def _card_data(row: sqlite3.Row) -> CardRecord:
         "labels": json.loads(row["labels"]),
         "assigneeId": row["assignee_id"],
         "commentCount": row["comment_count"],
+        "checklistDone": row["checklist_done"],
+        "checklistTotal": row["checklist_total"],
     }
 
 
@@ -809,27 +837,38 @@ def get_board(
         return _board_data(connection, board_id)
 
 
+# What hangs off a card and so has to survive a whole-board rewrite, with the
+# columns to carry across. `card_id` comes second in each so the restore can
+# filter on it by name.
+_CARD_CHILDREN = {
+    "card_comments": ("id", "card_id", "user_id", "body", "created_at"),
+    "card_checklist_items": ("id", "card_id", "body", "done"),
+}
+
+
 def replace_board(
     database_path: Path, user_id: str, board_id: str, board_data: BoardRecord
 ) -> BoardRecord:
     """Overwrite a board's contents. Callers must have checked ownership."""
     with _connection(database_path) as connection:
         # The rewrite below drops every column, so the board's cards cascade
-        # away and their comments with them. A card that survives the rewrite
-        # keeps its thread, so the comments are held aside and put back.
-        saved = connection.execute(
-            """
-            SELECT card_comments.id, card_comments.card_id,
-                   card_comments.user_id, card_comments.body,
-                   card_comments.created_at
-            FROM card_comments
-            JOIN cards ON cards.id = card_comments.card_id
-            JOIN columns ON columns.id = cards.column_id
-            WHERE columns.board_id = ?
-            ORDER BY card_comments.rowid
-            """,
-            (board_id,),
-        ).fetchall()
+        # away and everything hanging off them with it. A card that survives
+        # the rewrite keeps its thread and checklist, so those are held aside
+        # and put back.
+        saved = {
+            table: connection.execute(
+                f"""
+                SELECT {", ".join(f"{table}.{field}" for field in fields)}
+                FROM {table}
+                JOIN cards ON cards.id = {table}.card_id
+                JOIN columns ON columns.id = cards.column_id
+                WHERE columns.board_id = ?
+                ORDER BY {table}.rowid
+                """,
+                (board_id,),
+            ).fetchall()
+            for table, fields in _CARD_CHILDREN.items()
+        }
         connection.execute("DELETE FROM columns WHERE board_id = ?", (board_id,))
         columns = board_data["columns"]
         cards = board_data["cards"]
@@ -861,13 +900,18 @@ def replace_board(
                         card["assigneeId"],
                     ),
                 )
-        connection.executemany(
-            """
-            INSERT INTO card_comments (id, card_id, user_id, body, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [tuple(row) for row in saved if row["card_id"] in cards],
-        )
+        for table, fields in _CARD_CHILDREN.items():
+            connection.executemany(
+                f"""
+                INSERT INTO {table} ({", ".join(fields)})
+                VALUES ({", ".join("?" * len(fields))})
+                """,
+                [
+                    tuple(row)
+                    for row in saved[table]
+                    if row["card_id"] in cards
+                ],
+            )
         _record(connection, board_id, user_id, "Rewrote the whole board")
         return _board_data(connection, board_id)
 
@@ -1327,6 +1371,86 @@ def delete_card_comment(
               AND card_id IN ({_REACHABLE_CARD})
             """,
             (comment_id, user_id, user_id, user_id),
+        )
+        return cursor.rowcount == 1
+
+
+def _checklist_item_data(row: sqlite3.Row) -> ChecklistItemRecord:
+    return {
+        "id": row["id"],
+        "body": row["body"],
+        "done": bool(row["done"]),
+    }
+
+
+def list_checklist_items(
+    database_path: Path, user_id: str, card_id: str
+) -> list[ChecklistItemRecord] | None:
+    """A card's checklist in insertion order, or None when it is out of reach.
+
+    Ordered by rowid for the same reason comments are: items are only ever
+    appended, so there is no position to keep.
+    """
+    with _connection(database_path) as connection:
+        if not _card_is_reachable(connection, user_id, card_id):
+            return None
+        rows = connection.execute(
+            """
+            SELECT id, body, done FROM card_checklist_items
+            WHERE card_id = ?
+            ORDER BY rowid
+            """,
+            (card_id,),
+        ).fetchall()
+        return [_checklist_item_data(row) for row in rows]
+
+
+def create_checklist_item(
+    database_path: Path, user_id: str, card_id: str, body: str
+) -> ChecklistItemRecord | None:
+    with _connection(database_path) as connection:
+        if not _card_is_reachable(connection, user_id, card_id):
+            return None
+        item_id = _new_id("item")
+        connection.execute(
+            "INSERT INTO card_checklist_items (id, card_id, body) VALUES (?, ?, ?)",
+            (item_id, card_id, body),
+        )
+        return {"id": item_id, "body": body, "done": False}
+
+
+def set_checklist_item_done(
+    database_path: Path, user_id: str, item_id: str, done: bool
+) -> ChecklistItemRecord | None:
+    """Tick or untick an item. Anyone who can open the board may: a checklist
+    is the card's content rather than one person's, unlike a comment."""
+    with _connection(database_path) as connection:
+        cursor = connection.execute(
+            f"""
+            UPDATE card_checklist_items SET done = ?
+            WHERE id = ? AND card_id IN ({_REACHABLE_CARD})
+            """,
+            (int(done), item_id, user_id, user_id),
+        )
+        if cursor.rowcount != 1:
+            return None
+        row = connection.execute(
+            "SELECT id, body, done FROM card_checklist_items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        return _checklist_item_data(row)
+
+
+def delete_checklist_item(
+    database_path: Path, user_id: str, item_id: str
+) -> bool:
+    with _connection(database_path) as connection:
+        cursor = connection.execute(
+            f"""
+            DELETE FROM card_checklist_items
+            WHERE id = ? AND card_id IN ({_REACHABLE_CARD})
+            """,
+            (item_id, user_id, user_id),
         )
         return cursor.rowcount == 1
 

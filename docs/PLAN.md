@@ -641,3 +641,66 @@ wrong name the moment that changes.
 diffing. That path is the AI sidebar and the `PUT` route, where the interesting
 fact is that the board was replaced wholesale, not which of twenty positions
 moved.
+
+## Part 23: Card checklists
+
+A card carried a title, details, and a thread, but no way to break the work
+down. Anything with steps had to be either a wall of prose in `details` or a
+scattering of near-duplicate cards, and neither showed progress on the board.
+
+### Steps
+
+- [x] Migration 7 adds `card_checklist_items`
+- [x] `GET/POST /api/cards/{id}/checklist` and `PATCH/DELETE /api/checklist/{id}`
+- [x] Cards carry `checklistDone` and `checklistTotal`, counted not stored
+- [x] A `Checklist` section in the card dialog and a progress badge on the card
+
+### Success criteria
+
+- [x] Items are added unticked, kept in order, ticked, unticked, and deleted
+- [x] The card's badge and the dialog's "N of M done" stay in step without a
+      board refetch
+- [x] A member may tick the owner's item; a non-member gets a 404 on all four
+      routes
+- [x] A checklist survives a whole-board rewrite and goes with its card
+- [x] Backend 186 tests / 98% coverage, frontend 62 unit tests, 33 Playwright
+      tests, green on a full run
+
+### Decisions
+
+No `position` column. Columns and cards both carry one and pay for it with
+`_rewrite_positions`, because they are dragged. Checklist items are only ever
+appended, so `rowid` already is their order, and the `UNIQUE (parent, position)`
+dance buys nothing. If items ever become draggable this has to change, but
+adding the column now would be ordering machinery with no reorder behind it.
+
+Anyone who can open the board may tick and delete an item, which is the
+opposite of the rule for comments. A comment is one person's speech, so only
+its author may remove it; a checklist is the card's content, and a subtask being
+done is a fact about the work rather than about who noticed. The table records
+no author at all, for the same reason.
+
+`checklistDone` and `checklistTotal` are counted in `CARD_FIELDS` with
+correlated subqueries, exactly like `commentCount`, and `replace_board` never
+writes them back. A stored counter would be a second source of truth that drifts
+the first time a cascade removes rows behind its back.
+
+`CardChecklist` reports absolute counts up rather than a delta. `CardComments`
+reports `+1`/`-1` because every change moves one number by one; ticking an item
+moves `done` without moving `total`, and the component already holds the whole
+list, so sending both numbers is simpler than encoding which one moved.
+
+`replace_board`'s comment-preservation generalized into `_CARD_CHILDREN`. The
+rewrite drops every column, so cards cascade and everything hanging off them
+goes too. That was a one-table special case in Part 20; a second table made it a
+loop keyed by table name, so the next child table is one entry rather than a
+third copy of the save-and-restore block.
+
+Checklist changes are deliberately absent from the activity log. Ticking is the
+highest-frequency action in the app, and recording each one would push every
+other kind of change off the panel's 50-row window within a single work session.
+
+The Playwright spec clicks the checkbox instead of calling `check()`. The box is
+server-controlled -- there is no optimistic update, and it stays disabled until
+the `PATCH` returns -- so `check()`'s own post-click state assertion fires while
+the input is still unchanged and fails on a working app.

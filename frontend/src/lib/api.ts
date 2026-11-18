@@ -3,6 +3,7 @@ import type {
   Assignment,
   BoardData,
   Card,
+  ChecklistItem,
   Comment,
   Member,
 } from "@/lib/kanban";
@@ -238,6 +239,27 @@ export const deleteCardComment = (commentId: string) =>
   requestVoid(`/api/comments/${encodeURIComponent(commentId)}`, {
     method: "DELETE",
   });
+
+const checklistPath = (itemId: string) =>
+  `/api/checklist/${encodeURIComponent(itemId)}`;
+
+export const getChecklist = (cardId: string) =>
+  requestJson<ChecklistItem[]>(`${cardPath(cardId)}/checklist`);
+
+export const addChecklistItem = (cardId: string, body: string) =>
+  requestJson<ChecklistItem>(
+    `${cardPath(cardId)}/checklist`,
+    jsonRequest("POST", { body })
+  );
+
+export const setChecklistItemDone = (itemId: string, done: boolean) =>
+  requestJson<ChecklistItem>(
+    checklistPath(itemId),
+    jsonRequest("PATCH", { done })
+  );
+
+export const deleteChecklistItem = (itemId: string) =>
+  requestVoid(checklistPath(itemId), { method: "DELETE" });
 
 export const moveCard = (
   cardId: string,

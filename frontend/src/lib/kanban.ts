@@ -11,6 +11,15 @@ export type Card = {
   assigneeId: string | null;
   /** Counted from the card's thread by the API; never sent back. */
   commentCount: number;
+  /** Counted from the card's checklist by the API; never sent back. */
+  checklistDone: number;
+  checklistTotal: number;
+};
+
+export type ChecklistItem = {
+  id: string;
+  body: string;
+  done: boolean;
 };
 
 export type Member = {

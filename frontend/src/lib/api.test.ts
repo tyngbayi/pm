@@ -3,6 +3,7 @@ import {
   ApiError,
   addBoardMember,
   addCardComment,
+  addChecklistItem,
   chatWithAi,
   createBoard,
   createCard,
@@ -10,12 +11,14 @@ import {
   deleteBoard,
   deleteCard,
   deleteCardComment,
+  deleteChecklistItem,
   deleteColumn,
   getAssignments,
   getBoard,
   getBoardActivity,
   getBoards,
   getCardComments,
+  getChecklist,
   getCurrentUser,
   getBoardMembers,
   getHealth,
@@ -27,6 +30,7 @@ import {
   removeBoardMember,
   renameColumn,
   replaceBoard,
+  setChecklistItemDone,
   updateCard,
 } from "@/lib/api";
 
@@ -83,6 +87,10 @@ describe("API client", () => {
     await addCardComment("card/id", "Looks good");
     await deleteCardComment("comment/id");
     await moveCard("card/id", "column-1", 2);
+    await getChecklist("card/id");
+    await addChecklistItem("card/id", "Draft the spec");
+    await setChecklistItemDone("item/id", true);
+    await deleteChecklistItem("item/id");
     await getAssignments();
     await getBoardActivity("board/id");
 
@@ -116,6 +124,10 @@ describe("API client", () => {
       ["/api/cards/card%2Fid/comments", "POST"],
       ["/api/comments/comment%2Fid", "DELETE"],
       ["/api/cards/card%2Fid/move", "PATCH"],
+      ["/api/cards/card%2Fid/checklist", "GET"],
+      ["/api/cards/card%2Fid/checklist", "POST"],
+      ["/api/checklist/item%2Fid", "PATCH"],
+      ["/api/checklist/item%2Fid", "DELETE"],
       ["/api/assignments", "GET"],
       ["/api/boards/board%2Fid/activity", "GET"],
     ]);

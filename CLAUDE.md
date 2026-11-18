@@ -113,18 +113,21 @@ Pydantic models in `backend/main.py`, `TypedDict`s in `backend/database.py`, and
 types in `frontend/src/lib/kanban.ts`. A card carries `title`, `details`,
 `priority`, `dueDate`, `labels`, and `assigneeId` — camelCase like the existing
 `cardIds`, with `database.CARD_UPDATES` mapping each to its snake_case column so
-the TS types mirror the API exactly. It also carries `commentCount`, which is
-read-only: `CARD_FIELDS` counts it with a correlated subquery, the Pydantic model
-defaults it to 0 so an incoming update may omit it, and `replace_board` never
-writes it back. `board_update_error(board, member_ids)`
+the TS types mirror the API exactly. It also carries `commentCount`,
+`checklistDone`, and `checklistTotal`, which are read-only: `CARD_FIELDS` counts
+each with a correlated subquery, the Pydantic model defaults them to 0 so an
+incoming update may omit them, and `replace_board` never writes them back.
+`board_update_error(board, member_ids)`
 validates referential integrity (each card referenced exactly once, `cards` keys
 matching card ids) and that every assignee is a member of that board, which it
 needs because `replace_board` would otherwise fail the foreign key mid-write. Columns
 may be added, removed, and reordered; `replace_board` rewrites the whole board and
 cards under a removed column cascade away. That rewrite drops every column, so the
-board's cards cascade and their comments with them: `replace_board` holds the
-comments aside and reinserts the ones whose card survives. Without that, every
-`PUT` — and so every AI board update — silently erased the board's threads.
+board's cards cascade and everything hanging off them goes too: `replace_board`
+holds every table in `_CARD_CHILDREN` aside and reinserts the rows whose card
+survives. Without that, every `PUT` — and so every AI board update — silently
+erased the board's threads. A new per-card child table must be added to
+`_CARD_CHILDREN` or it will be erased the same way.
 
 **Boards.** A user owns any number of boards, served by `GET/POST /api/boards` and
 `GET/PUT/PATCH/DELETE /api/boards/{id}`, each seeded with its own five columns and
@@ -170,6 +173,18 @@ second-resolution and ids are random uuids, so same-second comments sorted at
 random. A comment survives its author losing board access — the thread is a record
 of the conversation — but `ON DELETE CASCADE` removes it with the card or the
 account.
+
+**Checklists.** `GET/POST /api/cards/{id}/checklist` and `PATCH/DELETE
+/api/checklist/{id}`, reachable through `_REACHABLE_CARD` like comments. Unlike
+comments, anyone who can open the board may tick and delete an item, and the
+table records no author: a checklist is the card's content, not one person's
+speech. There is no `position` column — items are append-only, so `rowid` is
+their order and they skip the `UNIQUE (parent, position)` rewrite that columns
+and cards need. `CardChecklist.tsx` owns its own requests and reports absolute
+`(done, total)` counts up, not a `+1`/`-1` delta like `CardComments`, because
+ticking moves one of the two numbers and the component already holds the list.
+Checklist changes are deliberately not recorded in the activity log: ticking is
+the most frequent action in the app and would crowd out everything else.
 
 **Assignments.** `GET /api/assignments` lists every card assigned to the
 signed-in user across all the boards they can open, carrying the board id/name

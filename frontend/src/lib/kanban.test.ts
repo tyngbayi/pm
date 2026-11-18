@@ -42,6 +42,9 @@ describe("filterBoard", () => {
     dueDate: "",
     labels: [],
     assigneeId: null,
+    commentCount: 0,
+    checklistDone: 0,
+    checklistTotal: 0,
     ...extra,
   });
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { CardChecklist } from "@/components/CardChecklist";
 import { CardComments } from "@/components/CardComments";
 import type { CardChanges } from "@/lib/api";
 import { PRIORITIES, type Card, type Member, type Priority } from "@/lib/kanban";
@@ -11,6 +12,7 @@ type CardDialogProps = {
   disabled: boolean;
   onSave: (cardId: string, changes: CardChanges) => Promise<boolean>;
   onCommentCountChange: (cardId: string, delta: number) => void;
+  onChecklistChange: (cardId: string, done: number, total: number) => void;
   onClose: () => void;
 };
 
@@ -35,6 +37,7 @@ export const CardDialog = ({
   disabled,
   onSave,
   onCommentCountChange,
+  onChecklistChange,
   onClose,
 }: CardDialogProps) => {
   const [draft, setDraft] = useState({
@@ -77,16 +80,16 @@ export const CardDialog = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(3,33,71,0.45)] p-4">
-      {/* The dialog is a div, not a form: the comment thread has a form of its
-          own and nesting one inside another is invalid HTML. */}
+      {/* The dialog is a div, not a form: the checklist and the comment thread
+          each have a form of their own, and nesting forms is invalid HTML. */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label={`Edit ${card.title}`}
         className="flex max-h-full w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-3xl bg-white p-6 shadow-[0_24px_48px_rgba(3,33,71,0.24)]"
       >
-        {/* Sticky: the comment thread makes the dialog scroll, and the close
-            button has to stay reachable from the bottom of it. */}
+        {/* Sticky: the checklist and thread make the dialog scroll, and the
+            close button has to stay reachable from the bottom of it. */}
         <div className="sticky top-0 flex items-start justify-between gap-3 bg-white pb-2">
           <h2 className="font-display text-xl font-semibold text-[var(--navy-dark)]">
             Card details
@@ -212,6 +215,13 @@ export const CardDialog = ({
           </button>
         </div>
         </form>
+
+        <CardChecklist
+          cardId={card.id}
+          onProgressChange={(done, total) =>
+            onChecklistChange(card.id, done, total)
+          }
+        />
 
         <CardComments
           cardId={card.id}

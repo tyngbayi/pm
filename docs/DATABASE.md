@@ -7,6 +7,7 @@
 - **Column**: belongs to a board and has a stable order and editable title.
 - **Card**: belongs to one column and has a stable order, title, details, priority, due date, labels, and an optional assignee.
 - **Comment**: a line of discussion written by one user on one card, in a thread anyone who can open the board may read and add to.
+- **Checklist item**: one subtask of a card, with a body and a done flag, belonging to the card rather than to a person.
 - **Activity**: one recorded change to a board, with a rendered summary and the account that made it.
 
 ## SQLite schema
@@ -96,6 +97,16 @@ CREATE TABLE board_activity (
     created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX board_activity_by_board ON board_activity (board_id);
+
+-- Added by migration 7. No `position`: items are only ever appended.
+CREATE TABLE card_checklist_items (
+    id      TEXT PRIMARY KEY NOT NULL,
+    card_id TEXT NOT NULL
+            REFERENCES cards (id) ON DELETE CASCADE,
+    body    TEXT NOT NULL,
+    done    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX card_checklist_by_card ON card_checklist_items (card_id);
 ```
 
 ## Relationships and constraints
@@ -137,7 +148,13 @@ CREATE INDEX board_activity_by_board ON board_activity (board_id);
   account". The board's history is a record of what happened to the board, so
   cascading it away with the author would rewrite it. Deleting the board itself
   does cascade, since there is then nothing to show it against.
-- A card's comment count is never stored. It is counted from `card_comments` in every card query, so it cannot drift from the thread.
+- A checklist item has no `position`. Items are only ever appended, so `rowid`
+  is their order, and they avoid the `UNIQUE (parent, position)` rewrite dance
+  that columns and cards need. Anyone who can open the board may add, tick, and
+  delete one: a checklist is the card's content, not one person's speech, so
+  unlike a comment it is not owned by its author and records no author at all.
+- A card's comment count is never stored, and neither are its checklist totals. All three are counted from `card_comments` and `card_checklist_items` in every card query, so they cannot drift from the rows they summarize.
+- A whole-board rewrite (`PUT /api/boards/{id}` and the AI sidebar) drops every column, so cards cascade and their comments and checklist items with them. `replace_board` holds both child tables aside and reinserts the rows whose card survives. Any future per-card child table must join that list or it will be silently erased on every rewrite.
 
 ## Migrations
 
@@ -157,6 +174,7 @@ Never edit a released migration; append a new one instead.
 | 4 | Add `board_members` for boards shared with users who do not own them |
 | 5 | Add `card_comments` for per-card discussion threads |
 | 6 | Add `board_activity` for the per-board history of who changed what |
+| 7 | Add `card_checklist_items` for per-card subtask checklists |
 
 A database migrated from v0 has no credentials for the seeded `user` account, so
 `initialize_database` backfills the demo password and promotes it to `admin`
