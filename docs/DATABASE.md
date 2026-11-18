@@ -2,10 +2,11 @@
 
 ## Entities
 
-- **User**: an account identified by a unique username. The MVP's `user` / `password` credentials remain hardcoded in FastAPI; passwords are not stored in this database.
-- **Board**: belongs to one user. The MVP allows one board per user.
+- **User**: an account identified by a unique username, holding a PBKDF2 password hash, a display name, and a role (`admin` or `member`).
+- **Board**: belongs to one user, who may own several, and may be shared with any number of other users. Each has an editable name.
 - **Column**: belongs to a board and has a stable order and editable title.
-- **Card**: belongs to one column and has a stable order, title, and details.
+- **Card**: belongs to one column and has a stable order, title, details, priority, due date, labels, and an optional assignee.
+- **Comment**: a line of discussion written by one user on one card, in a thread anyone who can open the board may read and add to.
 
 ## SQLite schema
 
@@ -13,15 +14,26 @@ Enable foreign-key enforcement on every SQLite connection with `PRAGMA foreign_k
 
 ```sql
 CREATE TABLE IF NOT EXISTS users (
-    id       TEXT PRIMARY KEY NOT NULL,
-    username TEXT NOT NULL UNIQUE
+    id            TEXT PRIMARY KEY NOT NULL,
+    username      TEXT NOT NULL UNIQUE,
+    -- Added by migration 1; see "Migrations" below.
+    password_hash TEXT NOT NULL DEFAULT '',
+    display_name  TEXT NOT NULL DEFAULT '',
+    role          TEXT NOT NULL DEFAULT 'member',
+    created_at    TEXT NOT NULL DEFAULT ''
 );
 
+-- Reshaped by migration 2: UNIQUE dropped from user_id, name and created_at
+-- added. See "Migrations" below.
 CREATE TABLE IF NOT EXISTS boards (
-    id      TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL UNIQUE
-            REFERENCES users (id) ON DELETE CASCADE
+    id         TEXT PRIMARY KEY NOT NULL,
+    user_id    TEXT NOT NULL
+               REFERENCES users (id) ON DELETE CASCADE,
+    name       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT ''
 );
+
+CREATE INDEX boards_by_user ON boards (user_id);
 
 CREATE TABLE IF NOT EXISTS columns (
     id       TEXT PRIMARY KEY NOT NULL,
@@ -32,6 +44,8 @@ CREATE TABLE IF NOT EXISTS columns (
     UNIQUE (board_id, position)
 );
 
+-- Extended by migration 3: priority, due_date, labels, assignee_id added.
+-- See "Migrations" below.
 CREATE TABLE IF NOT EXISTS cards (
     id       TEXT PRIMARY KEY NOT NULL,
     column_id TEXT NOT NULL
@@ -39,21 +53,96 @@ CREATE TABLE IF NOT EXISTS cards (
     title    TEXT NOT NULL,
     details  TEXT NOT NULL DEFAULT '',
     position INTEGER NOT NULL CHECK (position >= 0),
+    priority TEXT NOT NULL DEFAULT 'medium',
+    due_date TEXT NOT NULL DEFAULT '',
+    labels   TEXT NOT NULL DEFAULT '[]',
+    assignee_id TEXT
+                REFERENCES users (id) ON DELETE SET NULL,
     UNIQUE (column_id, position)
 );
+
+-- Added by migration 4. The owner stays in `boards.user_id`; this table only
+-- records the extra people a board is shared with.
+CREATE TABLE board_members (
+    board_id TEXT NOT NULL
+             REFERENCES boards (id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL
+            REFERENCES users (id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (board_id, user_id)
+);
+CREATE INDEX board_members_by_user ON board_members (user_id);
+
+-- Added by migration 5.
+CREATE TABLE card_comments (
+    id         TEXT PRIMARY KEY NOT NULL,
+    card_id    TEXT NOT NULL
+               REFERENCES cards (id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL
+               REFERENCES users (id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX card_comments_by_card ON card_comments (card_id);
 ```
 
 ## Relationships and constraints
 
 - IDs are text so they map directly to the frontend's string IDs. The application generates stable IDs when creating records.
-- `boards.user_id` is unique, so a user can own at most one board. Board creation logic must ensure each signed-in user has a board.
-- A new MVP board is initialized from the existing frontend seed: five columns and eight cards. Columns are renamed, not added or removed, in the MVP.
+- A user owns any number of boards, listed in `created_at, name, id` order. Every account is seeded with one board at registration, and the API refuses to delete a user's last board so there is always something to show.
+- Each new board is initialized from the frontend seed: five columns and eight cards, with freshly generated ids so no two boards share a column or card. Columns can then be renamed, added, reordered, and deleted; deleting one cascades its cards away.
 - A column has ordered cards. `position` is zero-based; card moves and reordering must update affected positions in a transaction.
+- `cards.priority` is `low`, `medium`, or `high`, and `cards.due_date` is an ISO `YYYY-MM-DD` string or empty for no deadline. Both are validated by the API, not by a `CHECK`, so the rule lives in one place alongside the rest of the request validation.
+- `cards.labels` is a JSON array of strings, since SQLite has no list type. Labels are free text owned by a card and are never queried across cards in SQL, so a join table would add work without buying anything. The API caps a card at 8 labels of 24 characters each.
+- `cards.assignee_id` is nullable and `ON DELETE SET NULL`, so deleting a user unassigns their cards on boards they do not own. Cards on their own boards cascade away with the user. The API rejects an assignee who is not a member of that card's board before writing, so the foreign key never fails mid-write.
+- A board is reachable by its owner (`boards.user_id`) plus every row in `board_members`. The owner is deliberately not duplicated into `board_members`: a second source of truth would have to be kept in step, and every read unions the two anyway. Removing a membership row also clears `assignee_id` on that board's cards for that user, so no card points at someone who can no longer open it.
 - Unique position constraints prevent ambiguous ordering within a board or column. Reordering code must avoid transient collisions while updating positions.
 - Deleting a user, board, or column cascades to its dependent rows. SQLite foreign-key enforcement must be enabled for each connection.
-- The database stores no passwords. Authentication remains the existing hardcoded MVP behavior; database-backed credentials would require a separately approved change and must store password hashes, never plaintext.
-- API queries must scope boards and their child records to the authenticated user.
-- Timestamps and board titles are omitted because the current MVP model does not use them.
+- Passwords are stored only as PBKDF2-SHA256 hashes in the form
+  `pbkdf2_sha256$<iterations>$<salt_hex>$<digest_hex>`. The iteration count is
+  embedded per hash, so raising it later leaves existing hashes verifiable.
+  Plaintext passwords are never stored, logged, or returned by the API.
+- `users.role` is `admin` or `member`. Only admins may reach `/api/users`. The
+  last remaining admin cannot be demoted, and an admin cannot delete their own
+  account, so the instance can never be left unadministrable.
+- API queries must scope boards and their child records to the authenticated user. Column and card queries match `board_id IN ({ACCESSIBLE_BOARD_IDS})` — the owned-plus-shared union — so they stay correct per board without a board id in the path. Never `=`, which silently picks one of the user's boards. Renaming, deleting, and changing membership check `boards.user_id` directly, since those stay owner-only.
+- Deleting a user's last *owned* board is refused; a board shared with them does not count, because it is not theirs to lose.
+- A card's comments are readable and writable by anyone who can open its board, but deletable only by their author. Both cascades are deliberate: deleting a card removes its thread, and deleting an account removes what that account wrote. Losing board access does not, since the thread is a record of the conversation.
+- Comments are ordered by `rowid`, which is insertion order. `created_at` is only second-resolution and ids are random, so neither breaks a same-second tie.
+- The API caps a comment at 2000 characters and refuses an empty one. There is no `CHECK`: the rule lives with the rest of the request validation.
+- A card's comment count is never stored. It is counted from `card_comments` in every card query, so it cannot drift from the thread.
+
+## Migrations
+
+Schema changes are tracked with SQLite's built-in `PRAGMA user_version`.
+`SCHEMA` in `backend/database.py` is frozen at the original v1 shape, and
+`MIGRATIONS` is an ordered tuple of `(version, SQL)` pairs applied on startup to
+any file below that version. Fresh and long-lived databases therefore follow the
+same upgrade path, and the `pm-data` volume upgrades in place without a wipe.
+
+Never edit a released migration; append a new one instead.
+
+| Version | Change |
+| ------- | ------ |
+| 1 | Add `password_hash`, `display_name`, `role`, `created_at` to `users` |
+| 2 | Rebuild `boards` without `UNIQUE (user_id)`, adding `name` and `created_at` |
+| 3 | Add `priority`, `due_date`, `labels`, `assignee_id` to `cards` |
+| 4 | Add `board_members` for boards shared with users who do not own them |
+| 5 | Add `card_comments` for per-card discussion threads |
+
+A database migrated from v0 has no credentials for the seeded `user` account, so
+`initialize_database` backfills the demo password and promotes it to `admin`
+rather than leaving it locked out.
+
+Migrations run on their own connection with `PRAGMA foreign_keys = OFF`. SQLite
+cannot drop a constraint in place, so migration 2 rebuilds `boards` and drops the
+old table; with enforcement on, that implicit delete would cascade every column
+and card away with it.
+
+`cards.assignee_id` has no explicit default because `ALTER TABLE ADD COLUMN`
+cannot attach a `REFERENCES` clause to a non-null default, so migration 3 leaves
+it defaulting to NULL. Existing cards therefore arrive unassigned, at medium
+priority, with no due date and no labels.
 
 ## JSON representation
 
@@ -65,29 +154,34 @@ The board API returns the existing frontend `BoardData` shape. Board and user ID
     {
       "id": "col-backlog",
       "title": "Backlog",
-      "cardIds": ["card-1", "card-2"]
+      "cardIds": ["card-1"]
     },
     {
       "id": "col-discovery",
       "title": "Discovery",
-      "cardIds": ["card-3"]
+      "cardIds": ["card-2"]
     }
   ],
   "cards": {
     "card-1": {
       "id": "card-1",
       "title": "Align roadmap themes",
-      "details": "Draft quarterly themes with impact statements and metrics."
+      "details": "Draft quarterly themes with impact statements and metrics.",
+      "priority": "high",
+      "dueDate": "2027-05-06",
+      "labels": ["planning"],
+      "assigneeId": "user-1",
+      "commentCount": 2
     },
     "card-2": {
       "id": "card-2",
       "title": "Gather customer signals",
-      "details": "Review support tags, sales notes, and churn feedback."
-    },
-    "card-3": {
-      "id": "card-3",
-      "title": "Prototype analytics view",
-      "details": "Sketch initial dashboard layout and key drill-downs."
+      "details": "Review support tags, sales notes, and churn feedback.",
+      "priority": "medium",
+      "dueDate": "",
+      "labels": [],
+      "assigneeId": null,
+      "commentCount": 0
     }
   }
 }

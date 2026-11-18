@@ -4,25 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ai import OpenRouterConfigurationError
+from conftest import board_id, board_url
 from main import create_app
-
-
-@pytest.fixture
-def client(tmp_path):
-    static_dir = tmp_path / "static"
-    static_dir.mkdir()
-    (static_dir / "index.html").write_text(
-        "<h1>Exported app</h1>", encoding="utf-8"
-    )
-    (static_dir / "project.html").write_text("<h1>Project</h1>", encoding="utf-8")
-    (static_dir / "404.html").write_text("<h1>Not found</h1>", encoding="utf-8")
-    app = create_app(
-        static_dir,
-        session_secret="test-session-secret",
-        database_path=tmp_path / "kanban.db",
-    )
-    with TestClient(app) as test_client:
-        yield test_client
 
 
 def sign_in(client):
@@ -96,10 +79,13 @@ def test_login_sets_signed_cookie_and_returns_current_user(client):
     response = sign_in(client)
 
     assert response.status_code == 200
-    assert response.json() == {"username": "user"}
+    body = response.json()
+    assert body["username"] == "user"
+    assert body["role"] == "admin"
+    assert "password" not in body and "password_hash" not in body
     assert "pm_session=" in response.headers["set-cookie"]
     assert "httponly" in response.headers["set-cookie"].lower()
-    assert client.get("/api/auth/me").json() == {"username": "user"}
+    assert client.get("/api/auth/me").json() == body
 
 
 def test_login_rejects_invalid_credentials(client):
@@ -131,7 +117,7 @@ def test_logout_clears_session(client):
 
 def test_board_is_protected_and_seeded_for_authenticated_user(client):
     sign_in(client)
-    response = client.get("/api/board")
+    response = client.get(board_url(client))
 
     assert response.status_code == 200
     board = response.json()
@@ -151,13 +137,20 @@ def test_board_is_protected_and_seeded_for_authenticated_user(client):
 @pytest.mark.parametrize(
     ("method", "path", "body"),
     [
-        ("get", "/api/board", None),
-        ("put", "/api/board", {"columns": [], "cards": {}}),
+        ("get", "/api/boards", None),
+        ("post", "/api/boards", {"name": "Board"}),
+        ("get", "/api/boards/board-id", None),
+        ("put", "/api/boards/board-id", {"columns": [], "cards": {}}),
+        ("patch", "/api/boards/board-id", {"name": "Board"}),
+        ("delete", "/api/boards/board-id", None),
         ("post", "/api/ai/ping", None),
         (
             "post",
             "/api/ai/chat",
-            {"messages": [{"role": "user", "content": "Hello"}]},
+            {
+                "board_id": "board-id",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
         ),
         ("patch", "/api/columns/column-id", {"title": "New title"}),
         ("post", "/api/cards", {"column_id": "column-id", "title": "New card"}),
@@ -210,7 +203,7 @@ def test_ai_ping_reports_missing_openrouter_configuration(client, monkeypatch):
 
 def test_ai_chat_reads_the_board_from_the_database(client, monkeypatch):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     messages = [{"role": "user", "content": "What is in my backlog?"}]
 
     def respond(request_messages, request_board):
@@ -220,7 +213,10 @@ def test_ai_chat_reads_the_board_from_the_database(client, monkeypatch):
 
     monkeypatch.setattr("main.chat_with_openrouter", respond)
 
-    response = client.post("/api/ai/chat", json={"messages": messages})
+    response = client.post(
+        "/api/ai/chat",
+        json={"board_id": board_id(client), "messages": messages},
+    )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -231,7 +227,7 @@ def test_ai_chat_reads_the_board_from_the_database(client, monkeypatch):
 
 def test_ai_chat_persists_a_valid_board_update(client, monkeypatch):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     card_id = board["columns"][0]["cardIds"][0]
     board["cards"][card_id]["title"] = "Updated by AI"
     monkeypatch.setattr(
@@ -243,7 +239,10 @@ def test_ai_chat_persists_a_valid_board_update(client, monkeypatch):
 
     response = client.post(
         "/api/ai/chat",
-        json={"messages": [{"role": "user", "content": "Update this card"}]},
+        json={
+            "board_id": board_id(client),
+            "messages": [{"role": "user", "content": "Update this card"}],
+        },
     )
 
     assert response.status_code == 200
@@ -251,15 +250,16 @@ def test_ai_chat_persists_a_valid_board_update(client, monkeypatch):
         "message": "I updated the card.",
         "board_update": board,
     }
-    assert client.get("/api/board").json()["cards"][card_id]["title"] == (
+    assert client.get(board_url(client)).json()["cards"][card_id]["title"] == (
         "Updated by AI"
     )
 
 
-def test_ai_chat_rejects_a_board_update_that_changes_columns(client, monkeypatch):
+def test_ai_chat_persists_a_board_update_that_reorders_columns(client, monkeypatch):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     board["columns"].reverse()
+    last_title = board["columns"][0]["title"]
     monkeypatch.setattr(
         "main.chat_with_openrouter",
         lambda *_: json.dumps({"message": "Reordered.", "board_update": board}),
@@ -267,11 +267,37 @@ def test_ai_chat_rejects_a_board_update_that_changes_columns(client, monkeypatch
 
     response = client.post(
         "/api/ai/chat",
-        json={"messages": [{"role": "user", "content": "Reorder the columns"}]},
+        json={
+            "board_id": board_id(client),
+            "messages": [{"role": "user", "content": "Reorder the columns"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["board_update"]["columns"][0]["title"] == last_title
+    assert client.get(board_url(client)).json()["columns"][0]["title"] == last_title
+
+
+def test_ai_chat_rejects_a_board_update_with_a_dangling_card(client, monkeypatch):
+    sign_in(client)
+    board = client.get(board_url(client)).json()
+    # The card stays in `cards` but no column references it any more.
+    board["columns"][0]["cardIds"] = []
+    monkeypatch.setattr(
+        "main.chat_with_openrouter",
+        lambda *_: json.dumps({"message": "Cleared.", "board_update": board}),
+    )
+
+    response = client.post(
+        "/api/ai/chat",
+        json={
+            "board_id": board_id(client),
+            "messages": [{"role": "user", "content": "Clear the backlog"}],
+        },
     )
 
     assert response.status_code == 502
-    assert client.get("/api/board").json()["columns"][0]["title"] == "Backlog"
+    assert client.get(board_url(client)).json()["columns"][0]["cardIds"]
 
 
 def test_ai_chat_rejects_invalid_structured_output(client, monkeypatch):
@@ -280,7 +306,10 @@ def test_ai_chat_rejects_invalid_structured_output(client, monkeypatch):
 
     response = client.post(
         "/api/ai/chat",
-        json={"messages": [{"role": "user", "content": "Hello"}]},
+        json={
+            "board_id": board_id(client),
+            "messages": [{"role": "user", "content": "Hello"}],
+        },
     )
 
     assert response.status_code == 502
@@ -288,37 +317,37 @@ def test_ai_chat_rejects_invalid_structured_output(client, monkeypatch):
 
 def test_put_board_replaces_cards_and_rejects_broken_references(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     first_card_id = board["columns"][0]["cardIds"][0]
     board["cards"][first_card_id]["title"] = "Updated through board"
 
-    response = client.put("/api/board", json=board)
+    response = client.put(board_url(client), json=board)
 
     assert response.status_code == 200
     assert response.json()["cards"][first_card_id]["title"] == "Updated through board"
 
     board["columns"][0]["cardIds"].append("missing-card")
-    invalid_response = client.put("/api/board", json=board)
+    invalid_response = client.put(board_url(client), json=board)
 
     assert invalid_response.status_code == 422
-    assert client.get("/api/board").json()["cards"][first_card_id][
+    assert client.get(board_url(client)).json()["cards"][first_card_id][
         "title"
     ] == "Updated through board"
 
 
 def test_put_board_cannot_change_fixed_columns(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     board["columns"].pop()
 
-    response = client.put("/api/board", json=board)
+    response = client.put(board_url(client), json=board)
 
     assert response.status_code == 422
 
 
 def test_column_rename_requires_an_existing_owned_column(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     column_id = board["columns"][0]["id"]
 
     response = client.patch(
@@ -328,7 +357,7 @@ def test_column_rename_requires_an_existing_owned_column(client):
 
     assert response.status_code == 200
     assert response.json() == {"id": column_id, "title": "Queue"}
-    assert client.get("/api/board").json()["columns"][0]["title"] == "Queue"
+    assert client.get(board_url(client)).json()["columns"][0]["title"] == "Queue"
     assert client.patch(
         "/api/columns/missing-column", json={"title": "Nope"}
     ).status_code == 404
@@ -340,7 +369,7 @@ def test_column_rename_requires_an_existing_owned_column(client):
 
 def test_create_card_appends_to_its_column_and_rejects_unknown_column(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     column_id = board["columns"][0]["id"]
 
     response = client.post(
@@ -354,7 +383,7 @@ def test_create_card_appends_to_its_column_and_rejects_unknown_column(client):
 
     assert response.status_code == 201
     assert response.json()["title"] == "New task"
-    updated_board = client.get("/api/board").json()
+    updated_board = client.get(board_url(client)).json()
     assert updated_board["columns"][0]["cardIds"][-1] == response.json()["id"]
     assert client.post(
         "/api/cards",
@@ -367,7 +396,7 @@ def test_create_card_appends_to_its_column_and_rejects_unknown_column(client):
 
 def test_update_card_accepts_partial_changes_and_rejects_invalid_requests(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     card_id = board["columns"][0]["cardIds"][0]
 
     response = client.patch(
@@ -394,14 +423,14 @@ def test_update_card_accepts_partial_changes_and_rejects_invalid_requests(client
 
 def test_delete_card_removes_card_and_compacts_column_order(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     column = board["columns"][0]
     deleted_id, remaining_id = column["cardIds"]
 
     response = client.delete(f"/api/cards/{deleted_id}")
 
     assert response.status_code == 204
-    updated_board = client.get("/api/board").json()
+    updated_board = client.get(board_url(client)).json()
     assert updated_board["columns"][0]["cardIds"] == [remaining_id]
     assert deleted_id not in updated_board["cards"]
     assert client.delete("/api/cards/missing-card").status_code == 404
@@ -409,7 +438,7 @@ def test_delete_card_removes_card_and_compacts_column_order(client):
 
 def test_move_card_reorders_and_moves_between_columns(client):
     sign_in(client)
-    board = client.get("/api/board").json()
+    board = client.get(board_url(client)).json()
     source = board["columns"][0]
     target = board["columns"][3]
     first_card_id, second_card_id = source["cardIds"]
@@ -457,7 +486,7 @@ def test_board_changes_persist_after_app_restart(tmp_path):
     ) as first_client:
         assert database_path.is_file()
         sign_in(first_client)
-        first_board = first_client.get("/api/board").json()
+        first_board = first_client.get(board_url(first_client)).json()
         column_id = first_board["columns"][0]["id"]
         first_client.patch(
             f"/api/columns/{column_id}",
@@ -472,6 +501,6 @@ def test_board_changes_persist_after_app_restart(tmp_path):
         )
     ) as second_client:
         sign_in(second_client)
-        persisted_board = second_client.get("/api/board").json()
+        persisted_board = second_client.get(board_url(second_client)).json()
 
     assert persisted_board["columns"][0]["title"] == "Persisted title"

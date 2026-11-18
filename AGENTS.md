@@ -5,15 +5,17 @@
 This project is building a Project Management App. Key features:
 - A user can sign in
 - When signed in, the user sees a Kanban board representing their project
-- The Kanban board has fixed columns that can be renamed
-- The cards on the Kanban board can be moved with drag and drop, and edited
+- ~~The Kanban board has fixed columns that can be renamed~~ Columns can also be added, reordered, and deleted
+- The cards on the Kanban board can be moved with drag and drop, and edited. Each carries a priority, due date, assignee, and labels, and the board can be searched and filtered by them
 - There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
 
 ## Limitations
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
+These framed the original MVP. The first two have since been lifted; see
+"Current Implementation" below and `docs/PLAN.md`.
 
-For the MVP, there will only be 1 Kanban board per signed in user.
+- ~~For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.~~ Real accounts now exist; `user` / `password` is seeded as the demo admin.
+- ~~For the MVP, there will only be 1 Kanban board per signed in user.~~ A user may own any number of boards.
 
 For the MVP, this will run locally (in a docker container)
 
@@ -35,8 +37,11 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 ## Current Implementation
 
 - The Next.js frontend is statically exported and served by FastAPI in Docker.
-- Fake-user sign-in is implemented with the credentials `user` / `password`.
+- Real accounts with PBKDF2 password hashes, sign-up, and `admin` / `member` roles. `user` / `password` is seeded as the demo admin. Admins manage the roster at `/admin`.
+- Each user owns any number of boards, created, renamed, shared, and deleted from the board switcher in the header. An owner may share a board with other accounts, who can then open and edit it and be assigned its cards, but not rename, delete, or reshare it.
 - SQLite persistence and authenticated board/card APIs are implemented; the frontend persists board state through the API.
+- Cards carry a priority, due date, labels, and an optional assignee, edited in a detail dialog. The board header searches and filters by text, assignee, and label.
+- Every card has a comment thread in its detail dialog, open to anyone who can see the board, with a comment count shown on the card.
 - The authenticated AI endpoints connect to OpenRouter using `OPENROUTER_API_KEY`; the sidebar can chat about the board and persist AI-proposed board updates.
 
 ## Color Scheme

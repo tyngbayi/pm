@@ -279,10 +279,6 @@ Add a sidebar to the frontend for full AI chat. If the AI returns a `board_updat
 - [x] A board-modifying instruction (e.g. "Add a card called X to Backlog") updates the board without a manual refresh
 - [x] All unit and e2e tests pass
 
-## Future extension
-## Part 11
-- make the login multi-user
-
 ## Part 12
 Code review follow-ups (see `docs/CODE_REVIEW.md`, 2026-11-17):
 - [x] Pin `SESSION_SECRET` in `.env` so container restarts don't silently sign out the demo user
@@ -291,3 +287,261 @@ Code review follow-ups (see `docs/CODE_REVIEW.md`, 2026-11-17):
 - [x] Untrack `frontend/test-results/.last-run.json` and add `/test-results/` and `/playwright-report/` to `frontend/.gitignore` so e2e runs stop dirtying the tree
 - [x] Have `POST /api/ai/chat` read the board from SQLite instead of trusting the client-supplied `board`. Resolved by also having the endpoint validate and persist the `board_update` itself, which removes the client `PUT` round-trip and the lost-update window with it
 - [x] Serve the exported `404.html` page for unknown page routes; `ExportStaticFiles` previously returned 200 with the board shell for e.g. `/nope`
+
+---
+
+# Project management expansion
+
+Parts 13-18 turn the single-board demo into a multi-user project management app.
+Work them in order: each part leaves the app runnable with all tests passing.
+
+## Part 13: Icon affordances
+
+Replace word-labelled controls with icons so cards and columns read as a dense board
+rather than a form.
+
+### Steps
+
+- [x] Add `lucide-react` and render card/column/header actions as icon buttons
+      (delete card, add/confirm/cancel card, AI assistant, log out, close sidebar)
+- [x] Keep an `aria-label` on every icon-only control so tests and screen readers
+      still address them by name
+- [x] Tests already selected controls by accessible name, so preserving the
+      `aria-label` text kept them passing unchanged
+
+### Success criteria
+
+- [x] No icon-only control is missing an accessible name, guarded by a unit test
+      that compares `getAllByRole("button")` against the subset with a non-empty
+      accessible name
+- [x] Unit suite passes (15 tests)
+
+---
+
+## Part 14: Real multi-user management
+
+Replace the hardcoded `user` / `password` pair with real accounts in SQLite.
+
+### Steps
+
+- [x] Add a migration mechanism. Uses the built-in `PRAGMA user_version` rather
+      than a `schema_version` table: `SCHEMA` stays frozen at the v1 shape and
+      `MIGRATIONS` carries every file forward, so fresh and existing databases
+      follow one upgrade path
+- [x] Extend `users` with `password_hash`, `display_name`, `role`, `created_at`
+- [x] Hash passwords with PBKDF2-SHA256 in `backend/security.py` (stdlib only,
+      600k iterations; tests patch `security.ITERATIONS` down to keep the suite fast)
+- [x] `POST /api/auth/register`, and admin-only `GET/POST/PATCH/DELETE /api/users`
+- [x] Session stores `user_id`; `require_user` resolves it from the database and
+      clears the cookie when the account no longer exists
+- [x] Registering seeds a starter board for the new account
+- [x] Frontend: `/signup` page, login/signup cross-links, header shows the
+      signed-in display name
+- [x] Admin user-management UI at `/admin` (`UserManagement.tsx`): roster table
+      with inline role editing, account creation, and deletion. The header links
+      there only for admins, and a member who navigates to the URL directly sees
+      the API's 403 message instead of a table
+
+### Success criteria
+
+- [x] Two accounts see strictly separate data, covered by an API-level isolation
+      test and a two-browser-context Playwright test
+- [x] Passwords are never stored or returned in plaintext
+- [x] An existing `kanban.db` upgrades without data loss, verified by a unit test
+      against a synthetic v0 file and against the real `pm-data` volume
+- [x] Guard rails: the last admin cannot be demoted and an admin cannot delete
+      their own account, enforced by the API and surfaced in the admin screen
+- [x] Backend 66 tests / 96% coverage, frontend 29 unit tests, 15 Playwright tests
+
+---
+
+## Part 15: Multiple boards per user
+
+### Steps
+
+- [x] Drop `UNIQUE` on `boards.user_id`; add `name` and `created_at`
+- [x] `GET/POST/PATCH/DELETE /api/boards`; scope every card/column query by board
+- [x] Frontend board switcher and board create/rename/delete
+
+`position` was dropped from this part: boards are ordered by `created_at, name, id`
+and no board-reordering UI is planned, so the column would carry no behavior.
+
+### Success criteria
+
+- [x] A user can hold several boards and switch between them
+- [x] Deleting a board cascades to its columns and cards
+
+---
+
+## Part 16: Column management
+
+### Steps
+
+- [x] `POST /api/columns`, `DELETE /api/columns/{id}`, `PATCH /api/columns/{id}/move`
+- [x] Relax the fixed-column-set rule in `board_update_error` accordingly
+- [x] Frontend: add, delete, and reorder columns
+
+Reordering uses left/right buttons rather than drag. The existing `DndContext`
+already claims column ids as droppable targets for cards, so making columns
+sortable in the same context would have meant reworking card drag-and-drop for
+no user-visible gain; buttons are also keyboard-accessible by default.
+
+---
+
+## Part 17: Richer cards
+
+### Steps
+
+- [x] Card fields: `priority`, `due_date`, `assignee_id`, `labels`
+- [x] Card detail dialog for editing them
+- [x] Filter and search the board by text, assignee, and label
+
+`labels` is a JSON array in a `TEXT` column rather than a join table. Labels are
+free text owned by a card, never queried across cards in SQL, and the whole card
+is read and written at once, so a table would add joins without buying anything.
+
+The assignee picker is fed by `GET /api/members`, a names-only roster any signed-in
+user may read. `GET /api/users` stays admin-only: picking an assignee needs display
+names, not usernames and roles.
+
+Drag is disabled while a filter is active. `position` is absolute, so dropping a
+card into a filtered column would persist the index among the visible cards rather
+than among all of them. The filter bar says so rather than failing silently.
+Filtering narrows cards only; every column stays on screen so a match is still
+readable in its status context.
+
+`POST /api/cards` still takes only a title and details. The dialog patches the rest,
+so widening create would duplicate the patch path for no user-visible gain.
+
+---
+
+## Part 18: Hardening
+
+### Steps
+
+- [x] Playwright coverage for every new flow
+- [x] Refresh `docs/DATABASE.md`, `AGENTS.md`, and the READMEs
+
+Specs run in parallel against one shared instance, so anything an account exposes
+globally has to be unique per test. `cards.spec.ts` picks an assignee by display
+name, and a name shared with another spec let `selectOption` choose that spec's
+account, which its cleanup then deleted mid-save; the API correctly answered 422,
+so the dialog stayed open and the test failed intermittently. Display names used
+for selection are now derived from the unique username.
+
+Assert the filter banner by its text, not `getByRole("status")`: dnd-kit mounts
+its own live region with that role, so the locator matches two elements.
+
+### Success criteria
+
+- [x] Every flow added in Parts 13-17 has a browser test: icon controls
+      (accessible names), accounts and roles, multiple boards, column add /
+      reorder / delete, card detail editing, and board filtering
+- [x] Backend 119 tests / 98% coverage, frontend 50 unit tests, 23 Playwright
+      tests, green on two consecutive full runs
+
+---
+
+## Part 19: Shared boards
+
+Boards are single-owner, but `GET /api/members` lists every account in the
+instance, so a card can be assigned to someone who cannot open the board it is
+on. Sharing closes that gap and makes the app genuinely multi-user rather than
+several private instances side by side.
+
+### Steps
+
+- [x] Migration 4: a `board_members` join table
+- [x] Scope board, column, and card queries to boards a user owns *or* is a
+      member of; keep rename, delete, and membership owner-only
+- [x] `GET/POST/DELETE /api/boards/{id}/members`, replacing the instance-wide
+      `GET /api/members`
+- [x] Validate card assignees against the board's members
+- [x] Frontend: share controls and a shared-board indicator
+
+### Success criteria
+
+- [x] A member can open, edit, and be assigned cards on a shared board
+- [x] A non-member still gets a 404, covered by an API isolation test
+- [x] Only the owner can rename, delete, or change the membership of a board
+- [x] Removing a member unassigns their cards on that board
+- [x] Backend 136 tests / 98% coverage, frontend 54 unit tests, 26 Playwright
+      tests, all green
+
+### Decisions
+
+The owner stays in `boards.user_id`; `board_members` records only the extra
+people. A duplicate owner row would have to be kept in step with the board and
+buys nothing, since every read unions the two anyway.
+
+`ACCESSIBLE_BOARD_IDS` is one SQL constant taking the user id twice, reused by
+every board, column, and card query. It keeps the existing `board_id IN
+(SELECT ...)` rule rather than reintroducing `JOIN boards`.
+
+Removing a member unassigns their cards on that board. Otherwise they stay
+assigned to a board they can no longer open and the card renders a blank name.
+Deleting the account outright is already handled by `ON DELETE SET NULL`.
+
+`DELETE /api/boards/{id}` checks ownership *before* the last-board rule. A
+member owns a board of their own, so the reverse order answered 409 for a
+shared board they were never allowed to delete at all. `count_boards` stays
+owner-only for the same reason: a shared board must not stop a user from
+deleting their own last one.
+
+The share dialog's submit is labelled "Add member", not "Share board", which
+is the switcher's button. Two controls with one accessible name make
+`getByRole("button", { name })` ambiguous in both vitest and Playwright.
+---
+
+## Part 20: Card comments
+
+Sharing made the app multi-user, but a board was still the only place to say
+anything, and a board says nothing about *why* a card moved. A comment thread
+per card gives the collaboration added in Part 19 somewhere to happen.
+
+### Steps
+
+- [x] Migration 5: a `card_comments` table
+- [x] `GET/POST /api/cards/{id}/comments` and `DELETE /api/comments/{id}`
+- [x] `commentCount` on the card payload, derived rather than stored
+- [x] Frontend: a thread in the card dialog and a count badge on the card
+
+### Success criteria
+
+- [x] Anyone who can open a board can read and add comments on its cards
+- [x] A comment can only be deleted by its author, the board owner included
+- [x] Deleting a card, or an account, takes the matching comments with it
+- [x] A board rewrite (`PUT`, or an AI board update) keeps the threads
+- [x] Backend 152 tests / 98% coverage, frontend 57 unit tests, 28 Playwright
+      tests, green on two consecutive full runs
+
+### Decisions
+
+`commentCount` is derived in `CARD_FIELDS` with a correlated subquery, not
+stored on the card. A stored counter is a second source of truth that drifts
+the moment a comment is deleted or a card cascades away. It is read-only: the
+Pydantic model defaults it to 0 so an incoming board update may omit it, and
+`replace_board` never writes it back.
+
+`replace_board` holds the board's comments aside and reinserts them. It rebuilds
+a board by dropping its columns, so cards cascade away and comments with them.
+Without this, every `PUT /api/boards/{id}` -- and so every AI board update --
+silently erased the whole board's comment history. Comments on a card the
+rewrite drops are not restored, matching the plain card-delete cascade.
+
+Threads are ordered by `rowid`, not `created_at`. `_now()` is only
+second-resolution and ids are random uuids, so two comments posted in the same
+second sorted at random. The e2e and unit tests caught this immediately.
+
+A comment survives its author losing board access. Removing a member unassigns
+their cards (Part 19) but leaves what they said, because the thread is a record
+of the conversation rather than a list of current members. Deleting the account
+outright does remove them, via `ON DELETE CASCADE`.
+
+Only the author may delete a comment, and the refusal is a 404 rather than a
+403, so it does not confirm that someone else's comment exists.
+
+`CardDialog` is a `div` wrapping two sibling forms, not one form. The thread
+needs its own submit, and nesting a form inside another is invalid HTML. Its
+header is sticky because the thread makes the dialog scroll and the close
+button has to stay reachable.

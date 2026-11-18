@@ -1,11 +1,13 @@
 "use client";
 
+import { Send, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { chatWithAi, type AiChatMessage } from "@/lib/api";
 import type { BoardData } from "@/lib/kanban";
 
 type AiSidebarProps = {
   isOpen: boolean;
+  boardId: string;
   isBoardSaving: boolean;
   onClose: () => void;
   onBoardUpdate: (board: BoardData) => void;
@@ -14,6 +16,7 @@ type AiSidebarProps = {
 
 export const AiSidebar = ({
   isOpen,
+  boardId,
   isBoardSaving,
   onClose,
   onBoardUpdate,
@@ -39,7 +42,7 @@ export const AiSidebar = ({
     onBusyChange(true);
 
     try {
-      const response = await chatWithAi(nextMessages);
+      const response = await chatWithAi(boardId, nextMessages);
       setMessages([
         ...nextMessages,
         { role: "assistant", content: response.message },
@@ -88,10 +91,10 @@ export const AiSidebar = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-[var(--stroke)] px-3 py-2 text-sm font-semibold text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)]"
+            className="rounded-full border border-[var(--stroke)] p-2 text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)]"
             aria-label="Close AI assistant"
           >
-            Close
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </header>
 
@@ -161,8 +164,9 @@ export const AiSidebar = ({
           <button
             type="submit"
             disabled={isSending || isBoardSaving || !draft.trim()}
-            className="w-full rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
           >
+            <Send aria-hidden className="h-4 w-4" />
             {isSending ? "Sending..." : "Send"}
           </button>
         </form>

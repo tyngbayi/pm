@@ -60,13 +60,16 @@ static export mounted at `/`.
 **Build pipeline.** The Dockerfile has a `node:22-alpine` stage that runs
 `next build` (`output: "export"` in `next.config.ts`), then copies `frontend/out`
 into the Python stage as `backend/static`. Frontend changes are only visible after an
-image rebuild, which is why the start scripts always rebuild.
+image rebuild, which is why the start scripts always rebuild. The Python stage copies
+backend modules by name, so a new `backend/*.py` file must be added to that `COPY`
+line or the container fails to start with `ModuleNotFoundError`.
 
 **Static serving.** `ExportStaticFiles` in `backend/main.py` subclasses `StaticFiles`
 to make the export work: on a 404 it retries `<path>.html` (extensionless exported
 pages), then serves the exported `404.html` with a real 404 status. Paths under `api/`
 or with a file suffix skip the `.html` retry. The export only contains `/`, `/login`,
-and `/404`, so there are no client-side routes to fall back to `index.html` for.
+`/signup`, `/admin`, and `/404`, so there are no client-side routes to fall back
+to `index.html` for.
 It also sets `Cache-Control`: `no-cache` for pages and `immutable` for
 `_next/static/` assets. Pages must revalidate because chunk filenames are
 content-hashed, so a cached page would otherwise request chunks that a rebuild
@@ -79,10 +82,21 @@ A lifespan hook runs `initialize_database`, which applies the `CREATE TABLE IF N
 EXISTS` schema and seeds the `user` account, its board, and five columns with eight
 cards when absent.
 
-**Auth.** Starlette `SessionMiddleware` with a signed `pm_session` cookie. Credentials
-are hardcoded (`user` / `password`) and no passwords are stored. `require_user`
-guards routes; `require_database_user` additionally resolves the DB user id, and all
+**Auth.** Starlette `SessionMiddleware` with a signed `pm_session` cookie holding
+`user_id`. Accounts live in SQLite with PBKDF2-SHA256 hashes from
+`backend/security.py`; `user` / `password` is only a seeded demo admin. `require_user`
+resolves the session to a `UserRecord` (clearing the cookie if the account is gone),
+`require_admin` gates `/api/users`, and `require_database_user` yields the id. All
 database queries join through `boards.user_id` to scope data to that user.
+`/admin` renders `UserManagement.tsx`, which is only linked from the board header
+for admins; the route itself is protected by the API's 403, not by the client.
+
+**Migrations.** `PRAGMA user_version` plus the `MIGRATIONS` tuple in
+`backend/database.py`. `SCHEMA` stays frozen at the v1 shape so fresh and existing
+databases share one upgrade path. Append new migrations; never edit a released one.
+`_apply_migrations` uses its own connection with `PRAGMA foreign_keys = OFF`:
+SQLite cannot drop a constraint in place, so migration 2 rebuilds `boards`, and
+dropping a parent table with enforcement on cascade-deletes all of its children.
 
 **Persistence.** `backend/database.py` is plain `sqlite3` with no ORM. Every call
 opens its own connection via the `_connection` context manager, which creates parent
@@ -96,16 +110,87 @@ by id).
 
 **Board contract.** `BoardData` is mirrored in three places and must stay in sync:
 Pydantic models in `backend/main.py`, `TypedDict`s in `backend/database.py`, and TS
-types in `frontend/src/lib/kanban.ts`. `PUT /api/board` validates referential
-integrity (each card referenced exactly once, `cards` keys matching card ids) and
-rejects any change to the column set or column order, since the MVP only renames
-columns.
+types in `frontend/src/lib/kanban.ts`. A card carries `title`, `details`,
+`priority`, `dueDate`, `labels`, and `assigneeId` — camelCase like the existing
+`cardIds`, with `database.CARD_UPDATES` mapping each to its snake_case column so
+the TS types mirror the API exactly. It also carries `commentCount`, which is
+read-only: `CARD_FIELDS` counts it with a correlated subquery, the Pydantic model
+defaults it to 0 so an incoming update may omit it, and `replace_board` never
+writes it back. `board_update_error(board, member_ids)`
+validates referential integrity (each card referenced exactly once, `cards` keys
+matching card ids) and that every assignee is a member of that board, which it
+needs because `replace_board` would otherwise fail the foreign key mid-write. Columns
+may be added, removed, and reordered; `replace_board` rewrites the whole board and
+cards under a removed column cascade away. That rewrite drops every column, so the
+board's cards cascade and their comments with them: `replace_board` holds the
+comments aside and reinserts the ones whose card survives. Without that, every
+`PUT` — and so every AI board update — silently erased the board's threads.
+
+**Boards.** A user owns any number of boards, served by `GET/POST /api/boards` and
+`GET/PUT/PATCH/DELETE /api/boards/{id}`, each seeded with its own five columns and
+eight cards. Deleting a user's last *owned* board is refused with a 409 so there is
+always something to render. Card and column routes take no board id: they scope
+themselves with `board_id IN ({ACCESSIBLE_BOARD_IDS})`, never `=`, which would
+silently pick one of the user's boards.
+
+**Sharing.** `board_members` records the extra people a board is shared with; the
+owner stays implicit in `boards.user_id`. `database.ACCESSIBLE_BOARD_IDS` unions
+the two and takes the user id twice — it is the single definition of "boards this
+user may read and edit", used by every board, column, and card query. Renaming,
+deleting, and changing membership stay owner-only through `require_board_owner`,
+which checks `boards.user_id` directly and answers 404 so a non-member learns
+nothing. `GET/POST/DELETE /api/boards/{id}/members` manage the roster; `POST` takes
+a username and `DELETE` a user id, and removing someone also unassigns their cards
+on that board so no card is left pointing at a name the board cannot render.
+`remove_board` must check ownership *before* the last-board rule, or a member who
+owns one board of their own gets a 409 for a shared board they could never delete.
+
+**Columns.** `PATCH /api/columns/{id}` renames one column and returns just that
+column. `POST /api/columns` (appends), `DELETE /api/columns/{id}` (cascades its
+cards), and `PATCH /api/columns/{id}/move` all reshape the board, so they return the
+whole `BoardData` and the frontend replaces its state with the response. Delete and
+move renumber the surviving columns through `_rewrite_positions`, which is shared
+with cards and takes the table and parent column as module-local literals.
+
+**Cards.** `POST /api/cards` takes only a title and details; the detail dialog
+patches everything else through `PATCH /api/cards/{id}`, which applies just the
+fields present in the request body. A null is rejected as malformed except for the
+fields in `NULLABLE_CARD_FIELDS` (`assigneeId`), where it is the only way to
+unassign. An assignee must be a member of the card's board, checked through
+`card_board_id` plus `board_member_ids`. `GET /api/boards/{id}/members` is the
+names-only roster that feeds the picker, readable by anyone who can open the board;
+`GET /api/users` stays admin-only because it exposes usernames and roles.
+
+**Comments.** `GET/POST /api/cards/{id}/comments` and `DELETE /api/comments/{id}`.
+Anyone who can open the card's board may read and add; only the author may delete,
+and the refusal is a 404 so it does not confirm someone else's comment exists.
+Reachability goes through `database._REACHABLE_CARD`, the card-level equivalent of
+`ACCESSIBLE_BOARD_IDS`. Threads are ordered by `rowid`, not `created_at`: that is
+second-resolution and ids are random uuids, so same-second comments sorted at
+random. A comment survives its author losing board access — the thread is a record
+of the conversation — but `ON DELETE CASCADE` removes it with the card or the
+account.
 
 **Frontend state.** `KanbanBoard.tsx` owns all board state; there is no store or
-context. It fetches `GET /api/board` on mount and routes every mutation through a
-`runMutation` helper that serializes writes behind an `isBoardBusy` flag and surfaces
-failures inline. Pure reordering logic lives in `moveCard` in
-`frontend/src/lib/kanban.ts` and is unit tested separately from the component.
+context. Its `openBoard` helper loads the board list and opens one by id, falling
+back to the first, and every mutation runs through a `runMutation` helper that
+serializes writes behind an `isBoardBusy` flag and surfaces failures inline.
+`BoardSwitcher.tsx` is the select plus create/rename/share/delete controls, hiding
+the owner-only ones on a shared board and suffixing its name with "(shared)".
+`ShareDialog.tsx` manages that board's roster; its submit is labelled "Add member"
+because "Share board" already names the switcher's button, and two controls with
+one accessible name make `getByRole` ambiguous in both test runners.
+`CardDialog.tsx` edits one card's fields. It is a `div` wrapping two sibling forms,
+not one form, because `CardComments.tsx` needs its own submit and nesting forms is
+invalid HTML; its header is sticky so the close button survives the thread making
+the dialog scroll. `CardComments.tsx` owns its own requests and reports a `+1`/`-1`
+delta up, so the card's badge stays in step without refetching the board.
+Pure reordering and filtering logic lives
+in `moveCard` and `filterBoard` in `frontend/src/lib/kanban.ts` and is unit tested
+separately from the component. `filterBoard` narrows cards but keeps every column,
+so a match stays readable in its status context; drag is disabled while a filter is
+active because `position` is absolute and a filtered drop would persist the index
+among the visible cards rather than among all of them.
 `frontend/src/lib/api.ts` is the only place that calls `fetch`; it throws `ApiError`
 carrying the status and the FastAPI `detail` string.
 
@@ -116,14 +201,15 @@ pass to the container. `chat_with_openrouter` embeds the current board JSON in t
 system prompt, requests `response_format: json_object`, caps the outgoing history at
 `MAX_HISTORY_MESSAGES` turns, and caps the reply at `MAX_COMPLETION_TOKENS`.
 
-`POST /api/ai/chat` is authoritative over the board: it takes only the conversation,
-reads the board from SQLite itself, validates the reply against `AiResponse`
+`POST /api/ai/chat` is authoritative over the board: it takes a `board_id` and the
+conversation, reads that board from SQLite itself, validates the reply against `AiResponse`
 (`message` plus optional `board_update`), then runs any `board_update` through the
 shared `board_update_error` check and persists it before returning the saved board.
 It returns 503 when the key is missing and 502 on a failed, invalid, or
 structurally-invalid response. `AiSidebar.tsx` therefore just renders the returned
-board; it never issues a `PUT`. `board_update_error` is shared with `PUT /api/board`,
-so both paths enforce the same referential-integrity and fixed-column-set rules.
+board; it never issues a `PUT`. `board_update_error` is shared with
+`PUT /api/boards/{id}`, so both paths enforce the same referential-integrity and
+fixed-column-set rules.
 
 ## Testing
 
@@ -132,6 +218,25 @@ success and relevant failure cases for API contract changes, and update the test
 a flow in the same change set. Coverage is informative, not a gate. There is no CI
 workflow, so do not describe tests as CI-enforced.
 
-Backend tests use `TestClient` against a real temporary SQLite file. Route tests
-patch `main.ask_openrouter` / `main.chat_with_openrouter`; `tests/test_ai.py` patches
+Backend tests use `TestClient` against a real temporary SQLite file. `tests/conftest.py`
+provides the `app` and `client` fixtures (take `app` when a test needs two independent
+sessions) and an autouse fixture that drops `security.ITERATIONS` to 1,000, since
+production PBKDF2 settings make the suite roughly five times slower. Route tests patch
+`main.ask_openrouter` / `main.chat_with_openrouter`; `tests/test_ai.py` patches
 `ai.OpenAI` to assert the outgoing request shape. Frontend unit tests mock `fetch`.
+
+Playwright specs that create accounts must delete them in `afterEach` (see
+`tests/accounts.spec.ts`), because e2e runs share the persistent `pm-data` volume.
+Spec files also run in parallel against that one instance, so a test that selects
+an account by display name must use a unique one: a shared name lets
+`selectOption` pick a parallel spec's account, which its cleanup then deletes
+mid-request.
+
+Three selectors are ambiguous in the browser and need naming around: `getByRole
+("status")` also matches dnd-kit's live region, `getByRole("alert")` also matches
+Next's route announcer (assert the message text instead), and `getByLabel("Board")`
+substring-matches every "... board" button, so it needs `{ exact: true }`.
+
+Inside the card dialog, a display name appears both as an Assignee `<option>` and
+as a comment author, so assertions about an author must be scoped to the thread:
+`within(dialog).getByRole("region", { name: "Comments" })`.

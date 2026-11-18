@@ -1,3 +1,4 @@
+import { Check, Plus, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 
 const initialFormState = { title: "", details: "" };
@@ -52,9 +53,10 @@ export const NewCardForm = ({ disabled, onAdd }: NewCardFormProps) => {
             <button
               type="submit"
               disabled={disabled}
-              className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110"
+              aria-label="Add card"
+              className="rounded-full bg-[var(--secondary-purple)] p-2 text-white transition hover:brightness-110"
             >
-              Add card
+              <Check aria-hidden className="h-4 w-4" />
             </button>
             <button
               type="button"
@@ -63,9 +65,10 @@ export const NewCardForm = ({ disabled, onAdd }: NewCardFormProps) => {
                 setIsOpen(false);
                 setFormState(initialFormState);
               }}
-              className="rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
+              aria-label="Cancel"
+              className="rounded-full border border-[var(--stroke)] p-2 text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
             >
-              Cancel
+              <X aria-hidden className="h-4 w-4" />
             </button>
           </div>
         </form>
@@ -74,9 +77,10 @@ export const NewCardForm = ({ disabled, onAdd }: NewCardFormProps) => {
           type="button"
           disabled={disabled}
           onClick={() => setIsOpen(true)}
-          className="w-full rounded-full border border-dashed border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
+          aria-label="Add a card"
+          className="flex w-full items-center justify-center rounded-full border border-dashed border-[var(--stroke)] px-3 py-2 text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
         >
-          Add a card
+          <Plus aria-hidden className="h-4 w-4" />
         </button>
       )}
     </div>

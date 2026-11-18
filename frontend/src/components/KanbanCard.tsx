@@ -1,17 +1,47 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
-import type { Card } from "@/lib/kanban";
+import {
+  CalendarDays,
+  MessageSquare,
+  Pencil,
+  Trash2,
+  UserRound,
+} from "lucide-react";
+import type { Card, Priority } from "@/lib/kanban";
 
 type KanbanCardProps = {
   card: Card;
+  assigneeName: string;
   disabled: boolean;
+  dragDisabled: boolean;
+  onEdit: (cardId: string) => void;
   onDelete: (cardId: string) => Promise<boolean>;
 };
 
-export const KanbanCard = ({ card, disabled, onDelete }: KanbanCardProps) => {
+const priorityStyles: Record<Priority, string> = {
+  low: "bg-[var(--surface)] text-[var(--gray-text)]",
+  medium: "bg-[rgba(32,157,215,0.12)] text-[var(--primary-blue)]",
+  high: "bg-[rgba(236,173,10,0.18)] text-[#8a6200]",
+};
+
+const cardButton =
+  "shrink-0 rounded-full border border-transparent p-1.5 text-[var(--gray-text)] transition hover:border-[var(--stroke)]";
+
+/** ISO dates sort lexicographically, so a string compare is enough. */
+const isOverdue = (dueDate: string) =>
+  Boolean(dueDate) && dueDate < new Date().toISOString().slice(0, 10);
+
+export const KanbanCard = ({
+  card,
+  assigneeName,
+  disabled,
+  dragDisabled,
+  onEdit,
+  onDelete,
+}: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: card.id, disabled });
+    useSortable({ id: card.id, disabled: dragDisabled });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -40,15 +70,75 @@ export const KanbanCard = ({ card, disabled, onDelete }: KanbanCardProps) => {
             {card.details}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void onDelete(card.id)}
-          disabled={disabled}
-          className="shrink-0 rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-          aria-label={`Delete ${card.title}`}
+        <div className="flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={() => onEdit(card.id)}
+            disabled={disabled}
+            className={`${cardButton} hover:text-[var(--primary-blue)]`}
+            aria-label={`Edit ${card.title}`}
+          >
+            <Pencil aria-hidden className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => void onDelete(card.id)}
+            disabled={disabled}
+            className={`${cardButton} hover:text-red-600`}
+            aria-label={`Delete ${card.title}`}
+          >
+            <Trash2 aria-hidden className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span
+          className={clsx(
+            "rounded-full px-2.5 py-1 font-semibold uppercase tracking-[0.1em]",
+            priorityStyles[card.priority]
+          )}
         >
-          Remove
-        </button>
+          {card.priority}
+        </span>
+        {card.dueDate && (
+          <span
+            className={clsx(
+              "inline-flex items-center gap-1.5",
+              isOverdue(card.dueDate)
+                ? "font-semibold text-red-700"
+                : "text-[var(--gray-text)]"
+            )}
+          >
+            <CalendarDays aria-hidden className="h-3.5 w-3.5" />
+            {card.dueDate}
+          </span>
+        )}
+        {assigneeName && (
+          <span className="inline-flex items-center gap-1.5 text-[var(--gray-text)]">
+            <UserRound aria-hidden className="h-3.5 w-3.5" />
+            {assigneeName}
+          </span>
+        )}
+        {card.commentCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1.5 text-[var(--gray-text)]"
+            aria-label={`${card.commentCount} comment${
+              card.commentCount === 1 ? "" : "s"
+            }`}
+          >
+            <MessageSquare aria-hidden className="h-3.5 w-3.5" />
+            {card.commentCount}
+          </span>
+        )}
+        {card.labels.map((cardLabel) => (
+          <span
+            key={cardLabel}
+            className="rounded-full border border-[var(--stroke)] px-2.5 py-1 text-[var(--navy-dark)]"
+          >
+            {cardLabel}
+          </span>
+        ))}
       </div>
     </article>
   );

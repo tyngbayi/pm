@@ -2,13 +2,14 @@ import os
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
-from typing import AsyncIterator, Literal
+from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from openai import APIError
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AfterValidator, BaseModel, Field, ValidationError
 from starlette.exceptions import HTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
@@ -22,21 +23,48 @@ from ai import (
 )
 from database import (
     BoardRecord,
+    BoardSummary,
+    CardRecord,
+    CommentRecord,
+    UserRecord,
+    add_board_member,
+    authenticate_user,
+    board_member_ids,
+    board_owner_id,
+    card_board_id,
+    count_admins,
+    count_boards,
+    create_board,
     create_card,
+    create_card_comment,
+    create_column,
+    create_user,
+    delete_board,
     delete_card,
+    delete_card_comment,
+    delete_column,
+    delete_user,
     get_board,
-    get_user_id,
+    get_user,
+    get_user_by_username,
     initialize_database,
+    list_board_members,
+    list_boards,
+    list_card_comments,
+    list_users,
     move_card,
+    move_column,
+    remove_board_member,
+    rename_board,
     rename_column,
     replace_board,
     update_card,
+    update_user,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
-DEMO_USERNAME = "user"
-DEMO_PASSWORD = "password"
 SESSION_SECRET = os.environ.get("SESSION_SECRET") or secrets.token_urlsafe(32)
+USERNAME_PATTERN = r"^[A-Za-z0-9_.-]+$"
 
 
 class LoginRequest(BaseModel):
@@ -44,10 +72,64 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=40, pattern=USERNAME_PATTERN)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str = Field(default="", max_length=80)
+
+
+class CreateUserRequest(RegisterRequest):
+    role: Literal["admin", "member"] = "member"
+
+
+class UpdateUserRequest(BaseModel):
+    display_name: str | None = Field(default=None, max_length=80)
+    role: Literal["admin", "member"] | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class UserData(BaseModel):
+    id: str
+    username: str
+    display_name: str
+    role: str
+    created_at: str
+
+
+class MemberData(BaseModel):
+    id: str
+    display_name: str
+
+
+Priority = Literal["low", "medium", "high"]
+Labels = Annotated[
+    list[Annotated[str, Field(min_length=1, max_length=24)]], Field(max_length=8)
+]
+
+
+def validate_due_date(value: str) -> str:
+    """Accept an ISO `YYYY-MM-DD` date, or an empty string for no due date."""
+    if value:
+        date.fromisoformat(value)
+    return value
+
+
+DueDate = Annotated[
+    str, AfterValidator(validate_due_date), Field(json_schema_extra={"format": "date"})
+]
+
+
 class CardData(BaseModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     details: str
+    priority: Priority = "medium"
+    dueDate: DueDate = ""
+    labels: Labels = []
+    assigneeId: str | None = None
+    # Counted from the comment thread rather than stored on the card, so an
+    # incoming board update may omit it and never writes it back.
+    commentCount: int = 0
 
 
 class ColumnData(BaseModel):
@@ -61,12 +143,28 @@ class BoardData(BaseModel):
     cards: dict[str, CardData]
 
 
+class BoardSummaryData(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    owned: bool
+
+
+class BoardNameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class AddBoardMemberRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=40)
+
+
 class AiChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1)
 
 
 class AiChatRequest(BaseModel):
+    board_id: str = Field(min_length=1)
     messages: list[AiChatMessage] = Field(min_length=1)
 
 
@@ -79,6 +177,15 @@ class RenameColumnRequest(BaseModel):
     title: str = Field(min_length=1)
 
 
+class CreateColumnRequest(BaseModel):
+    board_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+
+
+class MoveColumnRequest(BaseModel):
+    position: int = Field(ge=0)
+
+
 class CreateCardRequest(BaseModel):
     column_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
@@ -88,11 +195,32 @@ class CreateCardRequest(BaseModel):
 class UpdateCardRequest(BaseModel):
     title: str | None = None
     details: str | None = None
+    priority: Priority | None = None
+    dueDate: DueDate | None = None
+    labels: Labels | None = None
+    assigneeId: str | None = None
+
+
+# Clearing an assignee is a real update, so a null here is meaningful; a null
+# in any other field is a malformed request.
+NULLABLE_CARD_FIELDS = {"assigneeId"}
 
 
 class MoveCardRequest(BaseModel):
     column_id: str = Field(min_length=1)
     position: int = Field(ge=0)
+
+
+class CommentData(BaseModel):
+    id: str
+    body: str
+    author_id: str
+    author_name: str
+    created_at: str
+
+
+class CreateCommentRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
 
 
 HASHED_ASSET_PREFIX = "_next/static/"
@@ -147,7 +275,19 @@ class ExportStaticFiles(StaticFiles):
         return await super().get_response("index.html", scope)
 
 
-def board_update_error(board: BoardData, current: BoardRecord) -> str | None:
+def board_update_error(board: BoardData, member_ids: set[str]) -> str | None:
+    """Reject a board whose columns and cards do not line up.
+
+    Columns may be added, removed, and reordered; `replace_board` rewrites the
+    whole board, and cards under a removed column cascade away. Assignees are
+    checked against the board's members here because `replace_board` would
+    otherwise fail the foreign key mid-write.
+    """
+    if any(
+        card.assigneeId is not None and card.assigneeId not in member_ids
+        for card in board.cards.values()
+    ):
+        return "Board cards must be assigned to a member of this board"
     column_ids = [column.id for column in board.columns]
     card_references = [
         card_id for column in board.columns for card_id in column.cardIds
@@ -159,15 +299,7 @@ def board_update_error(board: BoardData, current: BoardRecord) -> str | None:
         or any(card_id != card.id for card_id, card in board.cards.items())
     ):
         return "Board columns and cards must reference each other exactly once"
-    if column_ids != [column["id"] for column in current["columns"]]:
-        return "Board columns cannot be added, removed, or reordered"
     return None
-
-
-def require_user(request: Request) -> str:
-    if request.session.get("username") != DEMO_USERNAME:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return DEMO_USERNAME
 
 
 def create_app(
@@ -192,32 +324,128 @@ def create_app(
         same_site="lax",
     )
 
+    def require_user(request: Request) -> UserRecord:
+        user_id = request.session.get("user_id")
+        user = get_user(db_path, user_id) if user_id else None
+        if user is None:
+            # Covers a session pointing at an account that has since been
+            # deleted, which would otherwise 500 further down.
+            request.session.clear()
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return user
+
+    def require_admin(user: UserRecord = Depends(require_user)) -> UserRecord:
+        if user["role"] != "admin":
+            raise HTTPException(
+                status_code=403, detail="Administrator access required"
+            )
+        return user
+
+    def require_database_user(user: UserRecord = Depends(require_user)) -> str:
+        return user["id"]
+
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/api/auth/login")
-    def login(credentials: LoginRequest, request: Request) -> dict[str, str]:
-        if (
-            credentials.username != DEMO_USERNAME
-            or credentials.password != DEMO_PASSWORD
-        ):
-            raise HTTPException(status_code=401, detail="Invalid username or password")
+    @app.post("/api/auth/login", response_model=UserData)
+    def login(credentials: LoginRequest, request: Request) -> UserRecord:
+        user = authenticate_user(
+            db_path, credentials.username, credentials.password
+        )
+        if user is None:
+            raise HTTPException(
+                status_code=401, detail="Invalid username or password"
+            )
         request.session.clear()
-        request.session["username"] = DEMO_USERNAME
-        return {"username": DEMO_USERNAME}
+        request.session["user_id"] = user["id"]
+        return user
+
+    @app.post("/api/auth/register", response_model=UserData, status_code=201)
+    def register(payload: RegisterRequest, request: Request) -> UserRecord:
+        user = create_user(
+            db_path,
+            payload.username,
+            payload.password,
+            payload.display_name.strip() or payload.username,
+        )
+        if user is None:
+            raise HTTPException(
+                status_code=409, detail="That username is already taken"
+            )
+        request.session.clear()
+        request.session["user_id"] = user["id"]
+        return user
 
     @app.post("/api/auth/logout", status_code=204)
     def logout(request: Request) -> Response:
         request.session.clear()
         return Response(status_code=204)
 
-    @app.get("/api/auth/me")
-    def current_user(username: str = Depends(require_user)) -> dict[str, str]:
-        return {"username": username}
+    @app.get("/api/auth/me", response_model=UserData)
+    def current_user(user: UserRecord = Depends(require_user)) -> UserRecord:
+        return user
+
+    @app.get("/api/users", response_model=list[UserData])
+    def get_users(_: UserRecord = Depends(require_admin)) -> list[UserRecord]:
+        return list_users(db_path)
+
+    @app.post("/api/users", response_model=UserData, status_code=201)
+    def post_user(
+        payload: CreateUserRequest, _: UserRecord = Depends(require_admin)
+    ) -> UserRecord:
+        user = create_user(
+            db_path,
+            payload.username,
+            payload.password,
+            payload.display_name.strip() or payload.username,
+            payload.role,
+        )
+        if user is None:
+            raise HTTPException(
+                status_code=409, detail="That username is already taken"
+            )
+        return user
+
+    @app.patch("/api/users/{user_id}", response_model=UserData)
+    def patch_user(
+        user_id: str,
+        payload: UpdateUserRequest,
+        _: UserRecord = Depends(require_admin),
+    ) -> UserRecord:
+        changes = payload.model_dump(exclude_unset=True, exclude_none=True)
+        if not changes:
+            raise HTTPException(status_code=422, detail="No changes supplied")
+        target = get_user(db_path, user_id)
+        if target is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if (
+            changes.get("role") == "member"
+            and target["role"] == "admin"
+            and count_admins(db_path) == 1
+        ):
+            raise HTTPException(
+                status_code=409, detail="The last administrator cannot be demoted"
+            )
+        updated = update_user(db_path, user_id, changes)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return updated
+
+    @app.delete("/api/users/{user_id}", status_code=204)
+    def remove_user(
+        user_id: str, admin: UserRecord = Depends(require_admin)
+    ) -> Response:
+        if user_id == admin["id"]:
+            raise HTTPException(
+                status_code=409, detail="You cannot delete your own account"
+            )
+        if not delete_user(db_path, user_id):
+            raise HTTPException(status_code=404, detail="User not found")
+        return Response(status_code=204)
 
     @app.post("/api/ai/ping")
-    def ai_ping(_: str = Depends(require_user)) -> dict[str, str]:
+    def ai_ping(_: UserRecord = Depends(require_user)) -> dict[str, str]:
         try:
             response = ask_openrouter("What is 2+2?")
         except OpenRouterConfigurationError as exc:
@@ -228,18 +456,12 @@ def create_app(
             ) from exc
         return {"response": response}
 
-    def require_database_user(username: str = Depends(require_user)) -> str:
-        user_id = get_user_id(db_path, username)
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        return user_id
-
     @app.post("/api/ai/chat", response_model=AiResponse)
     def ai_chat(
         payload: AiChatRequest,
         user_id: str = Depends(require_database_user),
     ) -> AiResponse:
-        board = get_board(db_path, user_id)
+        board = get_board(db_path, user_id, payload.board_id)
         if board is None:
             raise HTTPException(status_code=404, detail="Board not found")
 
@@ -259,13 +481,15 @@ def create_app(
         if response.board_update is None:
             return response
 
-        if board_update_error(response.board_update, board):
+        if board_update_error(
+            response.board_update, board_member_ids(db_path, payload.board_id)
+        ):
             raise HTTPException(
                 status_code=502, detail="OpenRouter returned an invalid board update"
             )
         try:
             updated = replace_board(
-                db_path, user_id, response.board_update.model_dump()
+                db_path, payload.board_id, response.board_update.model_dump()
             )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
@@ -273,32 +497,119 @@ def create_app(
             ) from exc
         return AiResponse(message=response.message, board_update=updated)
 
-    @app.get("/api/board", response_model=BoardData)
-    def read_board(user_id: str = Depends(require_database_user)) -> BoardRecord:
-        board = get_board(db_path, user_id)
+    def require_board_owner(board_id: str, user_id: str) -> None:
+        """Renaming, deleting, and sharing are the owner's call alone."""
+        if board_owner_id(db_path, board_id) != user_id:
+            raise HTTPException(status_code=404, detail="Board not found")
+
+    @app.get("/api/boards", response_model=list[BoardSummaryData])
+    def read_boards(
+        user_id: str = Depends(require_database_user),
+    ) -> list[BoardSummary]:
+        return list_boards(db_path, user_id)
+
+    @app.post("/api/boards", response_model=BoardSummaryData, status_code=201)
+    def post_board(
+        payload: BoardNameRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardSummary:
+        return create_board(db_path, user_id, payload.name.strip())
+
+    @app.patch("/api/boards/{board_id}", response_model=BoardSummaryData)
+    def patch_board(
+        board_id: str,
+        payload: BoardNameRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardSummary:
+        board = rename_board(db_path, user_id, board_id, payload.name.strip())
         if board is None:
             raise HTTPException(status_code=404, detail="Board not found")
         return board
 
-    @app.put("/api/board", response_model=BoardData)
-    def write_board(
-        board: BoardData, user_id: str = Depends(require_database_user)
+    @app.delete("/api/boards/{board_id}", status_code=204)
+    def remove_board(
+        board_id: str, user_id: str = Depends(require_database_user)
+    ) -> Response:
+        # Ownership first: a shared board is never the member's to lose, so
+        # answering 409 before this check would hide that they cannot delete it.
+        require_board_owner(board_id, user_id)
+        if count_boards(db_path, user_id) == 1:
+            raise HTTPException(
+                status_code=409, detail="Your last board cannot be deleted"
+            )
+        delete_board(db_path, user_id, board_id)
+        return Response(status_code=204)
+
+    # The assignee picker needs display names for everyone who can open this
+    # board. `/api/users` stays admin-only because it exposes usernames and roles.
+    @app.get("/api/boards/{board_id}/members", response_model=list[MemberData])
+    def read_board_members(
+        board_id: str, user_id: str = Depends(require_database_user)
+    ) -> list[UserRecord]:
+        members = list_board_members(db_path, user_id, board_id)
+        if members is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return members
+
+    @app.post(
+        "/api/boards/{board_id}/members",
+        response_model=MemberData,
+        status_code=201,
+    )
+    def post_board_member(
+        board_id: str,
+        payload: AddBoardMemberRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> UserRecord:
+        require_board_owner(board_id, user_id)
+        member = get_user_by_username(db_path, payload.username.strip())
+        if member is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        if not add_board_member(db_path, board_id, member["id"]):
+            raise HTTPException(
+                status_code=409, detail="That user already has this board"
+            )
+        return member
+
+    @app.delete("/api/boards/{board_id}/members/{member_id}", status_code=204)
+    def remove_board_member_route(
+        board_id: str,
+        member_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> Response:
+        require_board_owner(board_id, user_id)
+        if not remove_board_member(db_path, board_id, member_id):
+            raise HTTPException(status_code=404, detail="Board member not found")
+        return Response(status_code=204)
+
+    @app.get("/api/boards/{board_id}", response_model=BoardData)
+    def read_board(
+        board_id: str, user_id: str = Depends(require_database_user)
     ) -> BoardRecord:
-        current_board = get_board(db_path, user_id)
+        board = get_board(db_path, user_id, board_id)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return board
+
+    @app.put("/api/boards/{board_id}", response_model=BoardData)
+    def write_board(
+        board_id: str,
+        board: BoardData,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        current_board = get_board(db_path, user_id, board_id)
         if current_board is None:
             raise HTTPException(status_code=404, detail="Board not found")
-        error = board_update_error(board, current_board)
+        error = board_update_error(board, board_member_ids(db_path, board_id))
         if error:
             raise HTTPException(status_code=422, detail=error)
 
         try:
-            updated = replace_board(db_path, user_id, board.model_dump())
+            updated = replace_board(db_path, board_id, board.model_dump())
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
                 status_code=409, detail="Board data conflicts with existing records"
             ) from exc
-        if updated is None:
-            raise HTTPException(status_code=404, detail="Board not found")
         return updated
 
     @app.patch("/api/columns/{column_id}")
@@ -314,11 +625,45 @@ def create_app(
             raise HTTPException(status_code=404, detail="Column not found")
         return {"id": column_id, "title": title}
 
+    @app.post("/api/columns", response_model=BoardData, status_code=201)
+    def post_column(
+        payload: CreateColumnRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="Column title cannot be empty")
+        board = create_column(db_path, user_id, payload.board_id, title)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Board not found")
+        return board
+
+    @app.delete("/api/columns/{column_id}", response_model=BoardData)
+    def remove_column(
+        column_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        board = delete_column(db_path, user_id, column_id)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Column not found")
+        return board
+
+    @app.patch("/api/columns/{column_id}/move", response_model=BoardData)
+    def patch_column_move(
+        column_id: str,
+        payload: MoveColumnRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> BoardRecord:
+        board = move_column(db_path, user_id, column_id, payload.position)
+        if board is None:
+            raise HTTPException(status_code=404, detail="Column not found")
+        return board
+
     @app.post("/api/cards", response_model=CardData, status_code=201)
     def post_card(
         payload: CreateCardRequest,
         user_id: str = Depends(require_database_user),
-    ) -> dict[str, str]:
+    ) -> CardRecord:
         title = payload.title.strip()
         if not title:
             raise HTTPException(status_code=422, detail="Card title cannot be empty")
@@ -334,17 +679,28 @@ def create_app(
         card_id: str,
         payload: UpdateCardRequest,
         user_id: str = Depends(require_database_user),
-    ) -> dict[str, str]:
+    ) -> CardRecord:
         changes = payload.model_dump(exclude_unset=True)
-        if not changes or any(value is None for value in changes.values()):
-            raise HTTPException(
-                status_code=422, detail="Provide a title or details to update"
-            )
+        if not changes or any(
+            value is None and field not in NULLABLE_CARD_FIELDS
+            for field, value in changes.items()
+        ):
+            raise HTTPException(status_code=422, detail="Provide card fields to update")
         if "title" in changes:
             changes["title"] = changes["title"].strip()
             if not changes["title"]:
                 raise HTTPException(
                     status_code=422, detail="Card title cannot be empty"
+                )
+        assignee = changes.get("assigneeId")
+        if assignee is not None:
+            board_id = card_board_id(db_path, user_id, card_id)
+            if board_id is None:
+                raise HTTPException(status_code=404, detail="Card not found")
+            if assignee not in board_member_ids(db_path, board_id):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Cards must be assigned to a member of this board",
                 )
         card = update_card(db_path, user_id, card_id, changes)
         if card is None:
@@ -378,6 +734,44 @@ def create_app(
                 status_code=404, detail="Card or destination column not found"
             )
         return board
+
+    @app.get(
+        "/api/cards/{card_id}/comments", response_model=list[CommentData]
+    )
+    def read_card_comments(
+        card_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> list[CommentRecord]:
+        comments = list_card_comments(db_path, user_id, card_id)
+        if comments is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return comments
+
+    @app.post(
+        "/api/cards/{card_id}/comments",
+        response_model=CommentData,
+        status_code=201,
+    )
+    def add_card_comment(
+        card_id: str,
+        payload: CreateCommentRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> CommentRecord:
+        comment = create_card_comment(db_path, user_id, card_id, payload.body)
+        if comment is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return comment
+
+    @app.delete("/api/comments/{comment_id}", status_code=204)
+    def remove_card_comment(
+        comment_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> Response:
+        # Someone else's comment is not theirs to delete, and saying so would
+        # confirm it exists, so it reads the same as a missing one.
+        if not delete_card_comment(db_path, user_id, comment_id):
+            raise HTTPException(status_code=404, detail="Comment not found")
+        return Response(status_code=204)
 
     app.mount(
         "/",

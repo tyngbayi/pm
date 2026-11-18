@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import type { Card, Column } from "@/lib/kanban";
 import { KanbanCard } from "@/components/KanbanCard";
 import { NewCardForm } from "@/components/NewCardForm";
@@ -9,22 +10,39 @@ import { NewCardForm } from "@/components/NewCardForm";
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
+  index: number;
+  columnCount: number;
   disabled: boolean;
+  dragDisabled: boolean;
+  assigneeNames: Record<string, string>;
   onRename: (columnId: string, title: string) => Promise<boolean>;
+  onMove: (columnId: string, position: number) => Promise<boolean>;
+  onDelete: (columnId: string) => Promise<boolean>;
   onAddCard: (
     columnId: string,
     title: string,
     details: string
   ) => Promise<boolean>;
+  onEditCard: (cardId: string) => void;
   onDeleteCard: (columnId: string, cardId: string) => Promise<boolean>;
 };
+
+const columnButton =
+  "shrink-0 rounded-full border border-transparent p-1.5 text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--primary-blue)] disabled:opacity-30";
 
 export const KanbanColumn = ({
   column,
   cards,
+  index,
+  columnCount,
   disabled,
+  dragDisabled,
+  assigneeNames,
   onRename,
+  onMove,
+  onDelete,
   onAddCard,
+  onEditCard,
   onDeleteCard,
 }: KanbanColumnProps) => {
   const [titleDraft, setTitleDraft] = useState({
@@ -62,6 +80,35 @@ export const KanbanColumn = ({
             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
               {cards.length} cards
             </span>
+            <div className="ml-auto flex items-center">
+              <button
+                type="button"
+                onClick={() => void onMove(column.id, index - 1)}
+                disabled={disabled || index === 0}
+                aria-label={`Move ${column.title} left`}
+                className={columnButton}
+              >
+                <ChevronLeft aria-hidden className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void onMove(column.id, index + 1)}
+                disabled={disabled || index === columnCount - 1}
+                aria-label={`Move ${column.title} right`}
+                className={columnButton}
+              >
+                <ChevronRight aria-hidden className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void onDelete(column.id)}
+                disabled={disabled}
+                aria-label={`Delete ${column.title} column`}
+                className={`${columnButton} hover:text-red-600`}
+              >
+                <Trash2 aria-hidden className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           <input
             value={currentTitleDraft}
@@ -87,7 +134,12 @@ export const KanbanColumn = ({
             <KanbanCard
               key={card.id}
               card={card}
+              assigneeName={
+                card.assigneeId ? (assigneeNames[card.assigneeId] ?? "") : ""
+              }
               disabled={disabled}
+              dragDisabled={dragDisabled}
+              onEdit={onEditCard}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
             />
           ))}

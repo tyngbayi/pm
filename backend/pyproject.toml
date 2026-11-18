@@ -20,7 +20,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--cov=main --cov=database --cov-report=term-missing"
+addopts = "--cov=main --cov=database --cov=security --cov-report=term-missing"
 
 [tool.uv]
 package = false

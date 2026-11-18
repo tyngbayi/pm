@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { LogOut, Sparkles, Users } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -14,20 +16,55 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { AiSidebar } from "@/components/AiSidebar";
+import { BoardFilters } from "@/components/BoardFilters";
+import { BoardSwitcher } from "@/components/BoardSwitcher";
+import { CardDialog } from "@/components/CardDialog";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { NewColumnForm } from "@/components/NewColumnForm";
+import { ShareDialog } from "@/components/ShareDialog";
 import {
+  addBoardMember,
+  createBoard,
   createCard,
+  createColumn,
+  deleteBoard,
   deleteCard,
+  deleteColumn,
   getBoard,
+  getBoardMembers,
+  getBoards,
+  getCurrentUser,
   logout,
+  removeBoardMember,
   moveCard as moveCardApi,
+  moveColumn,
+  renameBoard,
   renameColumn,
+  updateCard,
+  type BoardSummary,
+  type CardChanges,
+  type User,
 } from "@/lib/api";
-import { moveCard as calculateMove, type BoardData } from "@/lib/kanban";
+import {
+  EMPTY_FILTER,
+  boardLabels,
+  filterBoard,
+  isFiltering,
+  moveCard as calculateMove,
+  type BoardData,
+  type Member,
+} from "@/lib/kanban";
 
 export const KanbanBoard = () => {
   const router = useRouter();
   const [board, setBoard] = useState<BoardData | null>(null);
+  const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [activeBoardId, setActiveBoardId] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [filter, setFilter] = useState(EMPTY_FILTER);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [isSharing, setIsSharing] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,11 +74,21 @@ export const KanbanBoard = () => {
   const [isAiBusy, setIsAiBusy] = useState(false);
   const isBoardBusy = isSaving || isAiBusy;
 
-  const loadBoard = useCallback(async () => {
+  /** Refresh the board list and show `boardId`, falling back to the first. */
+  const openBoard = useCallback(async (boardId: string) => {
     setError(null);
     setIsLoading(true);
     try {
-      setBoard(await getBoard());
+      const summaries = await getBoards();
+      const target =
+        summaries.find((summary) => summary.id === boardId) ?? summaries[0];
+      setBoards(summaries);
+      setActiveBoardId(target.id);
+      setBoard(await getBoard(target.id));
+      // The roster is per board, so it is reloaded alongside it. Without it
+      // assignees render as ids and the picker is empty, which is not worth
+      // failing the whole board over.
+      setMembers(await getBoardMembers(target.id).catch(() => []));
     } catch (error) {
       setError(
         error instanceof Error ? error.message : "Unable to load the board."
@@ -52,8 +99,14 @@ export const KanbanBoard = () => {
   }, []);
 
   useEffect(() => {
-    void loadBoard();
-  }, [loadBoard]);
+    void openBoard("");
+  }, [openBoard]);
+
+  useEffect(() => {
+    // AuthGuard already redirects on an invalid session, so a failure here
+    // only means the header renders without a name.
+    void getCurrentUser().then(setUser, () => undefined);
+  }, []);
 
   const runMutation = async <T,>(
     request: () => Promise<T>,
@@ -93,7 +146,13 @@ export const KanbanBoard = () => {
     const { active, over } = event;
     setActiveCardId(null);
 
-    if (!board || isBoardBusy || !over || active.id === over.id) {
+    if (
+      !board ||
+      isBoardBusy ||
+      isFiltering(filter) ||
+      !over ||
+      active.id === over.id
+    ) {
       return;
     }
 
@@ -138,6 +197,16 @@ export const KanbanBoard = () => {
       }
     );
 
+  // Column writes reshape the whole board, so the server's copy replaces ours.
+  const handleAddColumn = (title: string) =>
+    runMutation(() => createColumn(activeBoardId, title), setBoard);
+
+  const handleDeleteColumn = (columnId: string) =>
+    runMutation(() => deleteColumn(columnId), setBoard);
+
+  const handleMoveColumn = (columnId: string, position: number) =>
+    runMutation(() => moveColumn(columnId, position), setBoard);
+
   const handleAddCard = (
     columnId: string,
     title: string,
@@ -162,6 +231,35 @@ export const KanbanBoard = () => {
       }
     );
 
+  const handleUpdateCard = (cardId: string, changes: CardChanges) =>
+    runMutation(
+      () => updateCard(cardId, changes),
+      (card) => {
+        setBoard((previous) =>
+          previous
+            ? { ...previous, cards: { ...previous.cards, [card.id]: card } }
+            : previous
+        );
+      }
+    );
+
+  // The thread owns its own requests, so only the card's badge count is
+  // adjusted here rather than refetching the board for each comment.
+  const handleCommentCountChange = (cardId: string, delta: number) =>
+    setBoard((previous) => {
+      const card = previous?.cards[cardId];
+      if (!previous || !card) {
+        return previous;
+      }
+      return {
+        ...previous,
+        cards: {
+          ...previous.cards,
+          [cardId]: { ...card, commentCount: card.commentCount + delta },
+        },
+      };
+    });
+
   const handleDeleteCard = (columnId: string, cardId: string) =>
     runMutation(
       () => deleteCard(cardId),
@@ -185,6 +283,56 @@ export const KanbanBoard = () => {
                 ),
               }
             : previous
+        );
+      }
+    );
+
+  const handleCreateBoard = (name: string) =>
+    runMutation(
+      () => createBoard(name),
+      (created) => {
+        void openBoard(created.id);
+      }
+    );
+
+  const handleRenameBoard = (name: string) =>
+    runMutation(
+      () => renameBoard(activeBoardId, name),
+      (renamed) => {
+        setBoards((previous) =>
+          previous.map((board) =>
+            board.id === renamed.id ? renamed : board
+          )
+        );
+      }
+    );
+
+  const handleDeleteBoard = () =>
+    runMutation(
+      () => deleteBoard(activeBoardId),
+      () => {
+        void openBoard("");
+      }
+    );
+
+  const handleAddMember = (username: string) =>
+    runMutation(
+      () => addBoardMember(activeBoardId, username),
+      (member) => setMembers((previous) => [...previous, member])
+    );
+
+  const handleRemoveMember = (memberId: string) =>
+    runMutation(
+      async () => {
+        await removeBoardMember(activeBoardId, memberId);
+        // Their cards are unassigned server-side, so the board is refetched
+        // rather than patched locally.
+        return getBoard(activeBoardId);
+      },
+      (refreshed) => {
+        setBoard(refreshed);
+        setMembers((previous) =>
+          previous.filter((member) => member.id !== memberId)
         );
       }
     );
@@ -221,7 +369,7 @@ export const KanbanBoard = () => {
         <p role="alert">{error ?? "Unable to load the board."}</p>
         <button
           type="button"
-          onClick={() => void loadBoard()}
+          onClick={() => void openBoard(activeBoardId)}
           className="mt-4 rounded-full bg-[var(--secondary-purple)] px-5 py-3 text-sm font-semibold text-white"
         >
           Retry
@@ -229,6 +377,17 @@ export const KanbanBoard = () => {
       </main>
     );
   }
+
+  const activeBoard = boards.find((summary) => summary.id === activeBoardId);
+  const assigneeNames = Object.fromEntries(
+    members.map((member) => [member.id, member.display_name])
+  );
+  const visibleBoard = filterBoard(board, filter);
+  const visibleCardCount = Object.keys(visibleBoard.cards).length;
+  const editingCard = editingCardId ? board.cards[editingCardId] : null;
+  // Positions are absolute, so dragging a filtered board would persist the
+  // wrong index.
+  const isDragDisabled = isBoardBusy || isFiltering(filter);
 
   const lastColumn = board.columns[board.columns.length - 1];
   const stats = [
@@ -250,17 +409,23 @@ export const KanbanBoard = () => {
             <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
               <div className="min-w-0">
                 <p className="text-[0.65rem] font-semibold uppercase tracking-[0.35em] text-[var(--gray-text)]">
-                  Single Board Kanban
+                  {user ? `Signed in as ${user.display_name}` : "Kanban"}
                 </p>
                 <h1 className="mt-1 font-display text-3xl font-semibold leading-tight text-[var(--navy-dark)]">
                   Kanban Studio
                 </h1>
               </div>
 
-              <p className="hidden min-w-[16rem] flex-1 text-sm leading-6 text-[var(--gray-text)] lg:block">
-                Rename columns, drag cards between stages, and capture quick
-                notes without getting buried in settings.
-              </p>
+              <BoardSwitcher
+                boards={boards}
+                activeBoardId={activeBoardId}
+                disabled={isBoardBusy}
+                onSelect={(boardId) => void openBoard(boardId)}
+                onCreate={handleCreateBoard}
+                onRename={handleRenameBoard}
+                onDelete={handleDeleteBoard}
+                onShare={() => setIsSharing(true)}
+              />
 
               <div className="flex flex-wrap items-center gap-3">
                 <dl className="flex items-center divide-x divide-[var(--stroke)] rounded-2xl border border-[var(--stroke)] bg-[var(--surface)]">
@@ -275,25 +440,43 @@ export const KanbanBoard = () => {
                     </div>
                   ))}
                 </dl>
+                {user?.role === "admin" && (
+                  <Link
+                    href="/admin"
+                    aria-label="Manage accounts"
+                    className="rounded-full border border-[var(--stroke)] p-2.5 text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                  >
+                    <Users aria-hidden className="h-5 w-5" />
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsAiSidebarOpen((open) => !open)}
                   aria-controls="ai-sidebar"
                   aria-expanded={isAiSidebarOpen}
-                  className="rounded-full border border-[var(--primary-blue)] px-5 py-2.5 text-sm font-semibold text-[var(--primary-blue)] transition hover:bg-[var(--primary-blue)] hover:text-white"
+                  aria-label="AI assistant"
+                  className="rounded-full border border-[var(--primary-blue)] p-2.5 text-[var(--primary-blue)] transition hover:bg-[var(--primary-blue)] hover:text-white"
                 >
-                  AI assistant
+                  <Sparkles aria-hidden className="h-5 w-5" />
                 </button>
                 <button
                   type="button"
                   onClick={handleLogout}
                   disabled={isLoggingOut}
-                  className="rounded-full bg-[var(--secondary-purple)] px-5 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                  aria-label="Log out"
+                  className="rounded-full bg-[var(--secondary-purple)] p-2.5 text-white transition hover:brightness-110 disabled:opacity-60"
                 >
-                  {isLoggingOut ? "Signing out..." : "Log out"}
+                  <LogOut aria-hidden className="h-5 w-5" />
                 </button>
               </div>
             </div>
+            <BoardFilters
+              filter={filter}
+              labels={boardLabels(board)}
+              members={members}
+              matchCount={visibleCardCount}
+              onChange={setFilter}
+            />
             {error && (
               <p role="alert" className="text-sm text-red-700">
                 {error}
@@ -313,17 +496,27 @@ export const KanbanBoard = () => {
             onDragEnd={handleDragEnd}
           >
             <section className="flex items-stretch gap-5 overflow-x-auto pb-3">
-              {board.columns.map((column) => (
+              {visibleBoard.columns.map((column, index) => (
                 <KanbanColumn
                   key={column.id}
                   column={column}
-                  cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                  cards={column.cardIds.map(
+                    (cardId) => visibleBoard.cards[cardId]
+                  )}
+                  index={index}
+                  columnCount={visibleBoard.columns.length}
                   disabled={isBoardBusy}
+                  dragDisabled={isDragDisabled}
+                  assigneeNames={assigneeNames}
                   onRename={handleRenameColumn}
+                  onMove={handleMoveColumn}
+                  onDelete={handleDeleteColumn}
                   onAddCard={handleAddCard}
+                  onEditCard={setEditingCardId}
                   onDeleteCard={handleDeleteCard}
                 />
               ))}
+              <NewColumnForm disabled={isBoardBusy} onAdd={handleAddColumn} />
             </section>
             <DragOverlay>
               {activeCard ? (
@@ -336,12 +529,35 @@ export const KanbanBoard = () => {
         </main>
         <AiSidebar
           isOpen={isAiSidebarOpen}
+          boardId={activeBoardId}
           isBoardSaving={isSaving}
           onClose={() => setIsAiSidebarOpen(false)}
           onBoardUpdate={setBoard}
           onBusyChange={setIsAiBusy}
         />
       </div>
+      {isSharing && user && (
+        <ShareDialog
+          boardName={activeBoard?.name ?? "board"}
+          ownerId={user.id}
+          members={members}
+          disabled={isBoardBusy}
+          onAdd={handleAddMember}
+          onRemove={handleRemoveMember}
+          onClose={() => setIsSharing(false)}
+        />
+      )}
+      {editingCard && user && (
+        <CardDialog
+          card={editingCard}
+          members={members}
+          currentUserId={user.id}
+          disabled={isBoardBusy}
+          onSave={handleUpdateCard}
+          onCommentCountChange={handleCommentCountChange}
+          onClose={() => setEditingCardId(null)}
+        />
+      )}
     </div>
   );
 };

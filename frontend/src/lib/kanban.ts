@@ -1,7 +1,29 @@
+export const PRIORITIES = ["low", "medium", "high"] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
 export type Card = {
   id: string;
   title: string;
   details: string;
+  priority: Priority;
+  dueDate: string;
+  labels: string[];
+  assigneeId: string | null;
+  /** Counted from the card's thread by the API; never sent back. */
+  commentCount: number;
+};
+
+export type Member = {
+  id: string;
+  display_name: string;
+};
+
+export type Comment = {
+  id: string;
+  body: string;
+  author_id: string;
+  author_name: string;
+  created_at: string;
 };
 export type Column = {
   id: string;
@@ -12,6 +34,54 @@ export type Column = {
 export type BoardData = {
   columns: Column[];
   cards: Record<string, Card>;
+};
+
+export type BoardFilter = {
+  text: string;
+  assigneeId: string;
+  label: string;
+};
+
+/** An empty value in any field means "match anything". */
+export const EMPTY_FILTER: BoardFilter = { text: "", assigneeId: "", label: "" };
+
+export const isFiltering = (filter: BoardFilter) =>
+  Boolean(filter.text.trim() || filter.assigneeId || filter.label);
+
+export const boardLabels = (board: BoardData): string[] =>
+  [
+    ...new Set(Object.values(board.cards).flatMap((card) => card.labels)),
+  ].sort((a, b) => a.localeCompare(b));
+
+const matchesFilter = (card: Card, filter: BoardFilter) => {
+  const needle = filter.text.trim().toLowerCase();
+  const haystack = [card.title, card.details, ...card.labels]
+    .join(" ")
+    .toLowerCase();
+  return (
+    (!needle || haystack.includes(needle)) &&
+    (!filter.assigneeId || card.assigneeId === filter.assigneeId) &&
+    (!filter.label || card.labels.includes(filter.label))
+  );
+};
+
+/** Narrow a board to the matching cards, keeping every column visible. */
+export const filterBoard = (board: BoardData, filter: BoardFilter): BoardData => {
+  if (!isFiltering(filter)) {
+    return board;
+  }
+  const cards = Object.fromEntries(
+    Object.values(board.cards)
+      .filter((card) => matchesFilter(card, filter))
+      .map((card) => [card.id, card])
+  );
+  return {
+    columns: board.columns.map((column) => ({
+      ...column,
+      cardIds: column.cardIds.filter((cardId) => cardId in cards),
+    })),
+    cards,
+  };
 };
 
 const isColumnId = (columns: Column[], id: string) =>

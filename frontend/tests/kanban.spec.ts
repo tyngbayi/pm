@@ -35,20 +35,29 @@ test("signs in and logs out", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
+/** Id of the signed-in user's first board. */
+const firstBoardId = async (page: Page) => {
+  const response = await page.request.get("/api/boards");
+  expect(response.ok()).toBeTruthy();
+  return ((await response.json()) as { id: string }[])[0].id;
+};
+
 test.describe("authenticated board", () => {
   let originalBoard: BoardData | null = null;
+  let boardUrl = "";
 
   test.beforeEach(async ({ page }) => {
     originalBoard = null;
     await signIn(page);
-    const response = await page.request.get("/api/board");
+    boardUrl = `/api/boards/${await firstBoardId(page)}`;
+    const response = await page.request.get(boardUrl);
     expect(response.ok()).toBeTruthy();
     originalBoard = (await response.json()) as BoardData;
   });
 
   test.afterEach(async ({ page }) => {
     if (originalBoard) {
-      const response = await page.request.put("/api/board", {
+      const response = await page.request.put(boardUrl, {
         data: originalBoard,
       });
       expect(response.ok()).toBeTruthy();
@@ -63,7 +72,7 @@ test.describe("authenticated board", () => {
   test("applies a board update returned by the AI sidebar", async ({
     page,
   }) => {
-    const boardResponse = await page.request.get("/api/board");
+    const boardResponse = await page.request.get(boardUrl);
     expect(boardResponse.ok()).toBeTruthy();
     const board = (await boardResponse.json()) as BoardData;
     const doneColumn = board.columns[board.columns.length - 1];
