@@ -11,6 +11,7 @@ import {
   deleteCard,
   deleteCardComment,
   deleteColumn,
+  getAssignments,
   getBoard,
   getBoards,
   getCardComments,
@@ -81,6 +82,7 @@ describe("API client", () => {
     await addCardComment("card/id", "Looks good");
     await deleteCardComment("comment/id");
     await moveCard("card/id", "column-1", 2);
+    await getAssignments();
 
     expect(
       fetchMock.mock.calls.map(([url, init]) => [
@@ -112,6 +114,7 @@ describe("API client", () => {
       ["/api/cards/card%2Fid/comments", "POST"],
       ["/api/comments/comment%2Fid", "DELETE"],
       ["/api/cards/card%2Fid/move", "PATCH"],
+      ["/api/assignments", "GET"],
     ]);
 
     const bodyOf = (index: number) =>

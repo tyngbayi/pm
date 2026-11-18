@@ -545,3 +545,42 @@ Only the author may delete a comment, and the refusal is a 404 rather than a
 needs its own submit, and nesting a form inside another is invalid HTML. Its
 header is sticky because the thread makes the dialog scroll and the close
 button has to stay reachable.
+---
+
+## Part 21: The "My work" view
+
+Parts 18 and 19 gave a user many boards and a share list, so their assigned
+cards can now sit anywhere across several boards. Nothing gathered them: the
+only way to find your own work was to open each board and filter by assignee.
+
+### Steps
+
+- [x] `GET /api/assignments`, scoped through `ACCESSIBLE_BOARD_IDS`
+- [x] A `My work` dialog behind a header icon
+- [x] Selecting an entry switches to that board and opens the card
+
+### Success criteria
+
+- [x] Every card assigned to the user is listed, whichever board it is on
+- [x] Soonest due first, with undated cards last
+- [x] Losing access to a board drops its cards from the list
+- [x] Backend 162 tests / 98% coverage, frontend 59 unit tests, 30 Playwright
+      tests, green on two consecutive full runs
+
+### Decisions
+
+No migration. The query is a join over `cards`, `columns`, and `boards` on
+`assignee_id`, which the existing schema already answers; a denormalized
+"my work" table would be a second source of truth for no gain.
+
+Ordered by `cards.due_date = ''` before `cards.due_date`. An empty due date
+sorts first as text, which would put undated cards above overdue ones; the
+boolean expression pushes them last instead.
+
+The route reuses `ACCESSIBLE_BOARD_IDS`, so a card on a board shared with the
+user counts as their work and stops counting the moment that share is revoked.
+That falls out of the single definition rather than being special-cased.
+
+The dialog fetches on open rather than holding assignments in `KanbanBoard`
+state. The list is a read-only snapshot, so keeping it in step with every card
+edit would cost more than refetching the handful of rows when it is opened.

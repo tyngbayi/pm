@@ -42,6 +42,7 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 - SQLite persistence and authenticated board/card APIs are implemented; the frontend persists board state through the API.
 - Cards carry a priority, due date, labels, and an optional assignee, edited in a detail dialog. The board header searches and filters by text, assignee, and label.
 - Every card has a comment thread in its detail dialog, open to anyone who can see the board, with a comment count shown on the card.
+- A "My work" panel in the header gathers every card assigned to the signed-in user across all their boards, soonest due first; selecting one opens that board and card.
 - The authenticated AI endpoints connect to OpenRouter using `OPENROUTER_API_KEY`; the sidebar can chat about the board and persist AI-proposed board updates.
 
 ## Color Scheme

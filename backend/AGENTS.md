@@ -13,7 +13,9 @@ readable by anyone who can open that board, while `/api/users` stays admin-only.
 Each card has a comment thread under `GET/POST /api/cards/{id}/comments` and
 `DELETE /api/comments/{id}`: anyone who can open the board may read and add,
 only the author may delete, and the card payload carries a derived
-`commentCount`. The OpenRouter client in `ai.py` reads `OPENROUTER_API_KEY`
+`commentCount`. `GET /api/assignments` gathers every card assigned to the
+signed-in user across all the boards they can open, with the board name and
+column title on each, soonest due first and undated cards last. The OpenRouter client in `ai.py` reads `OPENROUTER_API_KEY`
 from the environment. The authenticated `/api/ai/ping` route verifies the
 connection, and `/api/ai/chat` takes a board id and the conversation, reads that
 board from SQLite, and validates and persists any board update before returning

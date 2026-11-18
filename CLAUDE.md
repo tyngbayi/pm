@@ -171,6 +171,16 @@ random. A comment survives its author losing board access — the thread is a re
 of the conversation — but `ON DELETE CASCADE` removes it with the card or the
 account.
 
+**Assignments.** `GET /api/assignments` lists every card assigned to the
+signed-in user across all the boards they can open, carrying the board id/name
+and column title so each row can be placed. It needs no table of its own: the
+query joins `cards` to `columns` to `boards` and scopes through
+`ACCESSIBLE_BOARD_IDS`, so a revoked share drops its cards from the list for
+free. Ordered by `cards.due_date = ''` before `cards.due_date`, because an
+empty date sorts first as text and would otherwise outrank an overdue card.
+`MyWorkDialog.tsx` fetches on open rather than holding the list in
+`KanbanBoard` state, and selecting a row opens that card's board first.
+
 **Frontend state.** `KanbanBoard.tsx` owns all board state; there is no store or
 context. Its `openBoard` helper loads the board list and opens one by id, falling
 back to the first, and every mutation runs through a `runMutation` helper that
@@ -236,6 +246,10 @@ Three selectors are ambiguous in the browser and need naming around: `getByRole
 ("status")` also matches dnd-kit's live region, `getByRole("alert")` also matches
 Next's route announcer (assert the message text instead), and `getByLabel("Board")`
 substring-matches every "... board" button, so it needs `{ exact: true }`.
+
+A card's `<article>` is itself a dnd-kit `role="button"` whose accessible name
+is built from its contents, so it also matches `getByRole("button", { name:
+"Edit <title>" })`. Pass `{ exact: true }` or scope to the card.
 
 Inside the card dialog, a display name appears both as an Assignee `<option>` and
 as a comment author, so assertions about an author must be scoped to the thread:

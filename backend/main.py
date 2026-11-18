@@ -22,6 +22,7 @@ from ai import (
     chat_with_openrouter,
 )
 from database import (
+    AssignmentRecord,
     BoardRecord,
     BoardSummary,
     CardRecord,
@@ -48,6 +49,7 @@ from database import (
     get_user,
     get_user_by_username,
     initialize_database,
+    list_assignments,
     list_board_members,
     list_boards,
     list_card_comments,
@@ -221,6 +223,16 @@ class CommentData(BaseModel):
 
 class CreateCommentRequest(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+class AssignmentData(BaseModel):
+    card_id: str
+    title: str
+    priority: Priority
+    dueDate: str
+    board_id: str
+    board_name: str
+    column_title: str
 
 
 HASHED_ASSET_PREFIX = "_next/static/"
@@ -772,6 +784,12 @@ def create_app(
         if not delete_card_comment(db_path, user_id, comment_id):
             raise HTTPException(status_code=404, detail="Comment not found")
         return Response(status_code=204)
+
+    @app.get("/api/assignments", response_model=list[AssignmentData])
+    def read_assignments(
+        user_id: str = Depends(require_database_user),
+    ) -> list[AssignmentRecord]:
+        return list_assignments(db_path, user_id)
 
     app.mount(
         "/",

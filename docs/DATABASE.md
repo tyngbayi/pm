@@ -110,6 +110,11 @@ CREATE INDEX card_comments_by_card ON card_comments (card_id);
 - A card's comments are readable and writable by anyone who can open its board, but deletable only by their author. Both cascades are deliberate: deleting a card removes its thread, and deleting an account removes what that account wrote. Losing board access does not, since the thread is a record of the conversation.
 - Comments are ordered by `rowid`, which is insertion order. `created_at` is only second-resolution and ids are random, so neither breaks a same-second tie.
 - The API caps a comment at 2000 characters and refuses an empty one. There is no `CHECK`: the rule lives with the rest of the request validation.
+- A user's assigned cards are read across boards by joining `cards` to
+  `columns` to `boards` on `cards.assignee_id`, scoped by the same accessible-
+  board union. There is no "my work" table: it would be a second source of
+  truth for something the existing rows already answer. The ordering puts
+  `due_date = ''` last explicitly, since an empty string otherwise sorts first.
 - A card's comment count is never stored. It is counted from `card_comments` in every card query, so it cannot drift from the thread.
 
 ## Migrations

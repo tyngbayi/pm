@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Sparkles, Users } from "lucide-react";
+import { ListChecks, LogOut, Sparkles, Users } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -20,6 +20,7 @@ import { BoardFilters } from "@/components/BoardFilters";
 import { BoardSwitcher } from "@/components/BoardSwitcher";
 import { CardDialog } from "@/components/CardDialog";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
+import { MyWorkDialog } from "@/components/MyWorkDialog";
 import { NewColumnForm } from "@/components/NewColumnForm";
 import { ShareDialog } from "@/components/ShareDialog";
 import {
@@ -65,6 +66,7 @@ export const KanbanBoard = () => {
   const [filter, setFilter] = useState(EMPTY_FILTER);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [isMyWorkOpen, setIsMyWorkOpen] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -337,6 +339,15 @@ export const KanbanBoard = () => {
       }
     );
 
+  // An assignment may sit on another board, so that board is opened first.
+  const handleOpenAssignment = async (boardId: string, cardId: string) => {
+    setIsMyWorkOpen(false);
+    if (boardId !== activeBoardId) {
+      await openBoard(boardId);
+    }
+    setEditingCardId(cardId);
+  };
+
   const handleLogout = async () => {
     setError(null);
     setIsLoggingOut(true);
@@ -440,6 +451,14 @@ export const KanbanBoard = () => {
                     </div>
                   ))}
                 </dl>
+                <button
+                  type="button"
+                  onClick={() => setIsMyWorkOpen(true)}
+                  aria-label="My work"
+                  className="rounded-full border border-[var(--stroke)] p-2.5 text-[var(--navy-dark)] transition hover:border-[var(--primary-blue)] hover:text-[var(--primary-blue)]"
+                >
+                  <ListChecks aria-hidden className="h-5 w-5" />
+                </button>
                 {user?.role === "admin" && (
                   <Link
                     href="/admin"
@@ -545,6 +564,14 @@ export const KanbanBoard = () => {
           onAdd={handleAddMember}
           onRemove={handleRemoveMember}
           onClose={() => setIsSharing(false)}
+        />
+      )}
+      {isMyWorkOpen && (
+        <MyWorkDialog
+          onOpenCard={(boardId, cardId) =>
+            void handleOpenAssignment(boardId, cardId)
+          }
+          onClose={() => setIsMyWorkOpen(false)}
         />
       )}
       {editingCard && user && (

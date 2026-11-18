@@ -41,6 +41,7 @@ src/
     CardComments.tsx  # One card's comment thread: list, add, delete own
     BoardFilters.tsx  # Search box plus assignee and label filters
     AiSidebar.tsx     # AI conversation UI and optional board update handling
+    MyWorkDialog.tsx  # Cross-board list of the signed-in user's assigned cards
     NewCardForm.tsx   # Inline add-card form (toggle open/closed per column)
     NewColumnForm.tsx # Inline add-column form at the end of the board
     AuthGuard.tsx     # Redirects unauthenticated users to /login
@@ -65,6 +66,7 @@ tests/
   cards.spec.ts       # Card detail editing and board filtering e2e tests
   sharing.spec.ts     # Board sharing, access, and revocation e2e tests
   comments.spec.ts    # Card comment thread and shared-board discussion e2e tests
+  mywork.spec.ts      # Cross-board assigned-card panel e2e tests
 ```
 
 ## Data model
@@ -84,6 +86,15 @@ type Card   = {
 type Column = { id: string; title: string; cardIds: string[] }
 type BoardData = { columns: Column[]; cards: Record<string, Card> }
 type Member = { id: string; display_name: string }
+type Assignment = {
+  card_id: string
+  title: string
+  priority: Priority
+  dueDate: string
+  board_id: string
+  board_name: string
+  column_title: string
+}
 type Comment = {
   id: string
   body: string
@@ -108,6 +119,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Switch board**: `BoardSwitcher` lists the boards a user can open and creates, renames, shares, or deletes them. Deletion is disabled while only one owned board remains.
 - **Share board**: a share icon opens `ShareDialog`, which adds a member by username and removes one by icon. A board owned by someone else is suffixed "(shared)" and hides the rename, share, and delete controls, matching the API, which answers 404 for all three.
 - **Persistence**: the board loads on page entry; successful add, rename, delete, and move operations persist across reloads. Loading and API errors are shown inline.
+- **My work**: a header icon opens `MyWorkDialog`, which fetches `GET /api/assignments` on open and lists every card assigned to the user across all their boards, soonest due first with undated cards last. Each row shows the board, column, priority, and due date (red once overdue); selecting one switches to that board and opens the card's dialog.
 - **AI assistant**: the sidebar sends the active board id and the conversation to `/api/ai/chat`; the backend reads, validates, and persists the board itself, so the sidebar just renders the board it gets back.
 
 ## Color palette (CSS custom properties)
@@ -127,6 +139,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Accounts**: `/admin` lists every account and lets admins create them, change roles, and delete them. The route relies on the API's 403, not on client-side gating.
 - **Persistent board**: on mount the app fetches `GET /api/boards` and then the active board; every mutation (drag, rename, add card, delete card) immediately calls the relevant backend endpoint so state survives page reload
 - **Comments**: every card has a persisted thread, shared by everyone who can open the board, with a count badge on the card.
+- **My work**: one cross-board view of the signed-in user's assigned cards, reachable from the board header.
 - **AI chat**: authenticated sidebar conversation uses OpenRouter; structured responses can update and persist the board. Requests use the configured paid model.
 
 ## Coding standards

@@ -58,6 +58,36 @@ const sampleBoard: BoardData = {
   },
 };
 
+const secondBoard: BoardData = {
+  columns: [{ id: "col-roadmap", title: "Roadmap", cardIds: ["card-9"] }],
+  cards: {
+    "card-9": card("card-9", "Draft the pricing page", "Outline the tiers.", {
+      assigneeId: "user-1",
+    }),
+  },
+};
+
+const assignments = [
+  {
+    card_id: "card-9",
+    title: "Draft the pricing page",
+    priority: "medium",
+    dueDate: "2027-02-01",
+    board_id: "board-2",
+    board_name: "Roadmap",
+    column_title: "Roadmap",
+  },
+  {
+    card_id: "card-1",
+    title: "Align roadmap themes",
+    priority: "high",
+    dueDate: "",
+    board_id: "board-1",
+    board_name: "My board",
+    column_title: "Backlog",
+  },
+];
+
 const members = [
   { id: "user-1", display_name: "Ada Lovelace" },
   { id: "user-2", display_name: "Grace Hopper" },
@@ -121,8 +151,14 @@ describe("KanbanBoard", () => {
       if (path === "/api/boards/board-1" && method === "GET") {
         return jsonResponse(sampleBoard);
       }
+      if (path === "/api/boards/board-2" && method === "GET") {
+        return jsonResponse(secondBoard);
+      }
       if (path.endsWith("/members") && method === "GET") {
         return jsonResponse(members);
+      }
+      if (path === "/api/assignments" && method === "GET") {
+        return jsonResponse(assignments);
       }
       if (path === "/api/auth/me" && method === "GET") {
         return signedInUser
@@ -871,6 +907,41 @@ describe("KanbanBoard", () => {
       "Database unavailable"
     );
     expect(input).toHaveValue("Backlog");
+  });
+
+  it("lists the cards assigned to the signed-in user across boards", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(screen.getByRole("button", { name: "My work" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "My work" });
+    expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual([
+      "",
+      "Draft the pricing pageRoadmap / Roadmapmedium2027-02-01",
+      "Align roadmap themesMy board / Backloghigh",
+    ]);
+  });
+
+  it("opens an assignment on the board it sits on", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Align roadmap themes");
+
+    await user.click(screen.getByRole("button", { name: "My work" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Draft the pricing page/ })
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Edit Draft the pricing page" })
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("column-col-roadmap")).toBeInTheDocument();
   });
 
   it("shows API failures and allows retrying the initial load", async () => {

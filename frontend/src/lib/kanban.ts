@@ -25,6 +25,17 @@ export type Comment = {
   author_name: string;
   created_at: string;
 };
+/** One card assigned to the signed-in user, placed in the board it sits on. */
+export type Assignment = {
+  card_id: string;
+  title: string;
+  priority: Priority;
+  dueDate: string;
+  board_id: string;
+  board_name: string;
+  column_title: string;
+};
+
 export type Column = {
   id: string;
   title: string;

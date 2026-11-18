@@ -210,6 +210,18 @@ class CommentRecord(TypedDict):
     created_at: str
 
 
+class AssignmentRecord(TypedDict):
+    """One of a user's assigned cards, placed in the board it sits on."""
+
+    card_id: str
+    title: str
+    priority: str
+    dueDate: str
+    board_id: str
+    board_name: str
+    column_title: str
+
+
 class ColumnRecord(TypedDict):
     id: str
     title: str
@@ -1215,3 +1227,40 @@ def _card_is_reachable(
         ).fetchone()
         is not None
     )
+
+
+def list_assignments(database_path: Path, user_id: str) -> list[AssignmentRecord]:
+    """Every card assigned to a user, across all the boards they can open.
+
+    Soonest due first. `due_date = ''` sorts first as text, so it is ordered on
+    separately to put undated cards last.
+    """
+    with _connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT cards.id AS card_id, cards.title, cards.priority,
+                   cards.due_date, boards.id AS board_id,
+                   boards.name AS board_name,
+                   columns.title AS column_title
+            FROM cards
+            JOIN columns ON columns.id = cards.column_id
+            JOIN boards ON boards.id = columns.board_id
+            WHERE cards.assignee_id = ?
+              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
+            ORDER BY cards.due_date = '', cards.due_date,
+                     boards.created_at, columns.position, cards.position
+            """,
+            (user_id, user_id, user_id),
+        ).fetchall()
+        return [
+            {
+                "card_id": row["card_id"],
+                "title": row["title"],
+                "priority": row["priority"],
+                "dueDate": row["due_date"],
+                "board_id": row["board_id"],
+                "board_name": row["board_name"],
+                "column_title": row["column_title"],
+            }
+            for row in rows
+        ]

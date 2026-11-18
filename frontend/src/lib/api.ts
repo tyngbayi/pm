@@ -1,4 +1,10 @@
-import type { BoardData, Card, Comment, Member } from "@/lib/kanban";
+import type {
+  Assignment,
+  BoardData,
+  Card,
+  Comment,
+  Member,
+} from "@/lib/kanban";
 
 export class ApiError extends Error {
   constructor(
@@ -241,6 +247,9 @@ export const moveCard = (
     `/api/cards/${encodeURIComponent(cardId)}/move`,
     jsonRequest("PATCH", { column_id: columnId, position })
   );
+
+export const getAssignments = () =>
+  requestJson<Assignment[]>("/api/assignments");
 
 export const chatWithAi = (boardId: string, messages: AiChatMessage[]) =>
   requestJson<AiChatResponse>(
