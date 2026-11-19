@@ -46,6 +46,7 @@ A working frontend MVP existed before the Docker setup; it was a pure frontend-o
 - Every card has a checklist of subtasks in its detail dialog, tickable by anyone who can see the board, with the done-of-total progress shown on the card.
 - A card can be moved to another of the user's boards from its detail dialog, taking its comments and checklist with it and leaving an entry in both boards' histories.
 - A card can be archived off the board rather than deleted, keeping its comments and checklist. An "Archive" panel in the header lists what is parked, newest first, and restores a card to the foot of the column it was archived from.
+- A card can be blocked by other cards on the same board, set from its detail dialog, which names both what is blocking the card and what the card is blocking. A blocked card carries a "Blocked" badge on the board. A dependency that would close a cycle is refused.
 - A "My work" panel in the header gathers every card assigned to the signed-in user across all their boards, soonest due first; selecting one opens that board and card.
 - A "Board history" panel in the header lists who changed what on the open board, newest first, so a shared board's members can see each other's edits.
 - The authenticated AI endpoints connect to OpenRouter using `OPENROUTER_API_KEY`; the sidebar can chat about the board and persist AI-proposed board updates.

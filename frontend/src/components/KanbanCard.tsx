@@ -4,6 +4,7 @@ import clsx from "clsx";
 import {
   Archive,
   CalendarDays,
+  CircleSlash,
   ListChecks,
   MessageSquare,
   Pencil,
@@ -131,6 +132,17 @@ export const KanbanCard = ({
           <span className="inline-flex items-center gap-1.5 text-[var(--gray-text)]">
             <UserRound aria-hidden className="h-3.5 w-3.5" />
             {assigneeName}
+          </span>
+        )}
+        {card.blockerCount > 0 && (
+          <span
+            className="inline-flex items-center gap-1.5 font-semibold text-red-700"
+            aria-label={`Blocked by ${card.blockerCount} card${
+              card.blockerCount === 1 ? "" : "s"
+            }`}
+          >
+            <CircleSlash aria-hidden className="h-3.5 w-3.5" />
+            Blocked
           </span>
         )}
         {card.commentCount > 0 && (

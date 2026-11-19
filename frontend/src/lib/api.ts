@@ -3,6 +3,8 @@ import type {
   Assignment,
   BoardData,
   Card,
+  CardLink,
+  CardLinks,
   ChecklistItem,
   Column,
   Comment,
@@ -43,9 +45,16 @@ type HealthStatus = { status: string };
 /** A column's own settings, without the cards sitting in it. */
 type ColumnSettings = Omit<Column, "cardIds">;
 export type ColumnChanges = Partial<Omit<ColumnSettings, "id">>;
-/** The API derives the three counts, so they are never sent back. */
+/** The API derives the counts, so they are never sent back. */
 export type CardChanges = Partial<
-  Omit<Card, "id" | "commentCount" | "checklistDone" | "checklistTotal">
+  Omit<
+    Card,
+    | "id"
+    | "commentCount"
+    | "checklistDone"
+    | "checklistTotal"
+    | "blockerCount"
+  >
 >;
 export type ArchivedCard = {
   id: string;
@@ -252,6 +261,20 @@ export const addCardComment = (cardId: string, body: string) =>
 
 export const deleteCardComment = (commentId: string) =>
   requestVoid(`/api/comments/${encodeURIComponent(commentId)}`, {
+    method: "DELETE",
+  });
+
+export const getCardLinks = (cardId: string) =>
+  requestJson<CardLinks>(`${cardPath(cardId)}/links`);
+
+export const addCardLink = (cardId: string, blockerId: string) =>
+  requestJson<CardLink>(
+    `${cardPath(cardId)}/links`,
+    jsonRequest("POST", { blocker_id: blockerId })
+  );
+
+export const deleteCardLink = (linkId: string) =>
+  requestVoid(`/api/links/${encodeURIComponent(linkId)}`, {
     method: "DELETE",
   });
 

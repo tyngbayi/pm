@@ -9,7 +9,7 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { KanbanBoard } from "@/components/KanbanBoard";
-import type { BoardData, Card } from "@/lib/kanban";
+import type { BoardData, Card, CardLinks } from "@/lib/kanban";
 
 const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
 const fetchMock = vi.fn<typeof fetch>();
@@ -30,6 +30,7 @@ const card = (
   commentCount: 0,
   checklistDone: 0,
   checklistTotal: 0,
+  blockerCount: 0,
   ...extra,
 });
 
@@ -50,9 +51,10 @@ const sampleBoard: BoardData = {
     "card-2": card("card-2", "Gather customer signals", "Review feedback.", {
       labels: ["research"],
     }),
-    // One comment already, matching the thread the mock serves for it.
+    // One comment and one blocker already, matching what the mock serves for it.
     "card-3": card("card-3", "Prototype analytics view", "Sketch the dashboard.", {
       commentCount: 1,
+      blockerCount: 1,
     }),
     "card-4": card("card-4", "Refine status language", "Standardize labels."),
     "card-5": card("card-5", "QA micro-interactions", "Verify interactions."),
@@ -137,6 +139,28 @@ const boardWithoutCard1 = (isArchived: boolean): BoardData => ({
       )
     : sampleBoard.cards,
 });
+
+/** card-3 is blocked by card-1 and blocks card-4; every other card is free. */
+const links: Record<string, CardLinks> = {
+  "card-3": {
+    blocked_by: [
+      {
+        id: "link-1",
+        card_id: "card-1",
+        title: "Align roadmap themes",
+        column_title: "Backlog",
+      },
+    ],
+    blocks: [
+      {
+        id: "link-2",
+        card_id: "card-4",
+        title: "Refine status language",
+        column_title: "In Progress",
+      },
+    ],
+  },
+};
 
 const members = [
   { id: "user-1", display_name: "Ada Lovelace" },
@@ -330,6 +354,26 @@ describe("KanbanBoard", () => {
       if (path.startsWith("/api/checklist/") && method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as { done: boolean };
         return jsonResponse({ ...checklist[1], done: body.done });
+      }
+      if (path.endsWith("/links") && method === "GET") {
+        const cardId = path.split("/")[3];
+        return jsonResponse(links[cardId] ?? { blocked_by: [], blocks: [] });
+      }
+      if (path.endsWith("/links") && method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { blocker_id: string };
+        const blocker = sampleBoard.cards[body.blocker_id];
+        return jsonResponse(
+          {
+            id: "link-new",
+            card_id: blocker.id,
+            title: blocker.title,
+            column_title: "Backlog",
+          },
+          201
+        );
+      }
+      if (path.startsWith("/api/links/") && method === "DELETE") {
+        return new Response(null, { status: 204 });
       }
       return jsonResponse({ detail: "Unexpected API request" }, 404);
     });
@@ -1051,6 +1095,114 @@ describe("KanbanBoard", () => {
       })
     );
     expect(await within(section).findByText("2 of 2 done")).toBeInTheDocument();
+  });
+
+  it("names both directions of a card's dependencies", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Prototype analytics view");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Prototype analytics view" })
+    );
+    const section = within(screen.getByRole("dialog")).getByRole("region", {
+      name: "Dependencies",
+    });
+
+    expect(
+      await within(section).findByText("Align roadmap themes")
+    ).toBeInTheDocument();
+    expect(
+      within(section).getByText("This card is blocking Refine status language.")
+    ).toBeInTheDocument();
+    // Neither end of an existing dependency, nor the card itself, is offered.
+    expect(
+      within(section).queryByRole("option", { name: "Align roadmap themes" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(section).queryByRole("option", { name: "Prototype analytics view" })
+    ).not.toBeInTheDocument();
+    expect(
+      within(section).getByRole("option", { name: "Gather customer signals" })
+    ).toBeInTheDocument();
+  });
+
+  it("blocks a card and badges it without refetching the board", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Refine status language");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Refine status language" })
+    );
+    const dialog = screen.getByRole("dialog");
+    const section = within(dialog).getByRole("region", {
+      name: "Dependencies",
+    });
+    await within(section).findByText("Nothing is blocking this card.");
+
+    await user.selectOptions(
+      within(section).getByLabelText("Blocked by"),
+      "card-2"
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cards/card-4/links",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ blocker_id: "card-2" }),
+      })
+    );
+    expect(
+      await within(section).findByText("Gather customer signals")
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close card details" })
+    );
+    expect(
+      within(screen.getByTestId("card-card-4")).getByLabelText(
+        "Blocked by 1 card"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("lifts a dependency and clears the card's badge", async () => {
+    const user = userEvent.setup();
+    render(<KanbanBoard />);
+    await screen.findByText("Prototype analytics view");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit Prototype analytics view" })
+    );
+    const dialog = screen.getByRole("dialog");
+    const section = within(dialog).getByRole("region", {
+      name: "Dependencies",
+    });
+    await within(section).findByText("Align roadmap themes");
+
+    await user.click(
+      within(section).getByRole("button", {
+        name: "Stop Align roadmap themes blocking this card",
+      })
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/links/link-1",
+      expect.objectContaining({ method: "DELETE" })
+    );
+    expect(
+      await within(section).findByText("Nothing is blocking this card.")
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "Close card details" })
+    );
+    expect(
+      within(screen.getByTestId("card-card-3")).queryByLabelText(
+        "Blocked by 1 card"
+      )
+    ).not.toBeInTheDocument();
   });
 
   it("closes the detail dialog without saving", async () => {

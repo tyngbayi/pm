@@ -3,6 +3,7 @@ import {
   ApiError,
   addBoardMember,
   addCardComment,
+  addCardLink,
   addChecklistItem,
   chatWithAi,
   createBoard,
@@ -11,6 +12,7 @@ import {
   deleteBoard,
   deleteCard,
   deleteCardComment,
+  deleteCardLink,
   deleteChecklistItem,
   deleteColumn,
   getAssignments,
@@ -19,6 +21,7 @@ import {
   getBoardArchive,
   getBoards,
   getCardComments,
+  getCardLinks,
   getChecklist,
   getCurrentUser,
   getBoardMembers,
@@ -99,6 +102,9 @@ describe("API client", () => {
     await getBoardActivity("board/id");
     await setCardArchived("card/id", true);
     await getBoardArchive("board/id");
+    await getCardLinks("card/id");
+    await addCardLink("card/id", "blocker-1");
+    await deleteCardLink("link/id");
 
     expect(
       fetchMock.mock.calls.map(([url, init]) => [
@@ -139,6 +145,9 @@ describe("API client", () => {
       ["/api/boards/board%2Fid/activity", "GET"],
       ["/api/cards/card%2Fid/archived", "PATCH"],
       ["/api/boards/board%2Fid/archive", "GET"],
+      ["/api/cards/card%2Fid/links", "GET"],
+      ["/api/cards/card%2Fid/links", "POST"],
+      ["/api/links/link%2Fid", "DELETE"],
     ]);
 
     const bodyOf = (index: number) =>
@@ -153,6 +162,7 @@ describe("API client", () => {
     expect(bodyOf(23)).toEqual({ column_id: "column-1", position: 2 });
     expect(bodyOf(24)).toEqual({ board_id: "board-1" });
     expect(bodyOf(31)).toEqual({ archived: true });
+    expect(bodyOf(34)).toEqual({ blocker_id: "blocker-1" });
   });
 
   it("sends only the changed card fields", async () => {

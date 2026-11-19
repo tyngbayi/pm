@@ -27,6 +27,8 @@ from database import (
     AssignmentRecord,
     BoardRecord,
     BoardSummary,
+    CardLinkRecord,
+    CardLinksRecord,
     CardRecord,
     ChecklistItemRecord,
     ColumnSummary,
@@ -42,12 +44,14 @@ from database import (
     create_board,
     create_card,
     create_card_comment,
+    create_card_link,
     create_checklist_item,
     create_column,
     create_user,
     delete_board,
     delete_card,
     delete_card_comment,
+    delete_card_link,
     delete_checklist_item,
     delete_column,
     delete_user,
@@ -61,6 +65,7 @@ from database import (
     list_board_members,
     list_boards,
     list_card_comments,
+    list_card_links,
     list_checklist_items,
     list_users,
     move_card,
@@ -144,12 +149,12 @@ class CardData(BaseModel):
     dueDate: DueDate = ""
     labels: Labels = []
     assigneeId: str | None = None
-    # Counted from the thread and the checklist rather than stored on the
-    # card, so an incoming board update may omit these and never writes them
-    # back.
+    # Counted from the card's child tables rather than stored on it, so an
+    # incoming board update may omit these and never writes them back.
     commentCount: int = 0
     checklistDone: int = 0
     checklistTotal: int = 0
+    blockerCount: int = 0
 
 
 class ColumnData(BaseModel):
@@ -280,6 +285,24 @@ class CreateChecklistItemRequest(BaseModel):
 
 class SetChecklistItemRequest(BaseModel):
     done: bool
+
+
+class CardLinkData(BaseModel):
+    """One dependency, named from the far side: `card_id` is the other card."""
+
+    id: str
+    card_id: str
+    title: str
+    column_title: str
+
+
+class CardLinksData(BaseModel):
+    blocked_by: list[CardLinkData]
+    blocks: list[CardLinkData]
+
+
+class CreateCardLinkRequest(BaseModel):
+    blocker_id: str = Field(min_length=1)
 
 
 class ActivityData(BaseModel):
@@ -945,6 +968,42 @@ def create_app(
     ) -> Response:
         if not delete_checklist_item(db_path, user_id, item_id):
             raise HTTPException(status_code=404, detail="Item not found")
+        return Response(status_code=204)
+
+    @app.get("/api/cards/{card_id}/links", response_model=CardLinksData)
+    def read_card_links(
+        card_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> CardLinksRecord:
+        links = list_card_links(db_path, user_id, card_id)
+        if links is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return links
+
+    @app.post(
+        "/api/cards/{card_id}/links",
+        response_model=CardLinkData,
+        status_code=201,
+    )
+    def add_card_link(
+        card_id: str,
+        payload: CreateCardLinkRequest,
+        user_id: str = Depends(require_database_user),
+    ) -> CardLinkRecord:
+        result = create_card_link(db_path, user_id, card_id, payload.blocker_id)
+        if "status" in result:
+            raise HTTPException(
+                status_code=result["status"], detail=result["detail"]
+            )
+        return result
+
+    @app.delete("/api/links/{link_id}", status_code=204)
+    def remove_card_link(
+        link_id: str,
+        user_id: str = Depends(require_database_user),
+    ) -> Response:
+        if not delete_card_link(db_path, user_id, link_id):
+            raise HTTPException(status_code=404, detail="Link not found")
         return Response(status_code=204)
 
     @app.get(

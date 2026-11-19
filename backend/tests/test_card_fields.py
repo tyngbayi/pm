@@ -84,6 +84,7 @@ def test_update_card_persists_every_new_field(client):
         "commentCount": 0,
         "checklistDone": 0,
         "checklistTotal": 0,
+        "blockerCount": 0,
     }
     board = client.get(board_url(client)).json()
     assert board["cards"][card_id]["labels"] == ["design", "urgent"]

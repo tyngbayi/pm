@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { CardChecklist } from "@/components/CardChecklist";
+import { CardDependencies } from "@/components/CardDependencies";
 import { CardComments } from "@/components/CardComments";
 import type { BoardSummary, CardChanges } from "@/lib/api";
 import { PRIORITIES, type Card, type Member, type Priority } from "@/lib/kanban";
@@ -9,12 +10,14 @@ type CardDialogProps = {
   card: Card;
   members: Member[];
   otherBoards: BoardSummary[];
+  boardCards: Card[];
   currentUserId: string;
   disabled: boolean;
   onSave: (cardId: string, changes: CardChanges) => Promise<boolean>;
   onMoveToBoard: (cardId: string, boardId: string) => Promise<boolean>;
   onCommentCountChange: (cardId: string, delta: number) => void;
   onChecklistChange: (cardId: string, done: number, total: number) => void;
+  onBlockerCountChange: (cardId: string, count: number) => void;
   onClose: () => void;
 };
 
@@ -36,12 +39,14 @@ export const CardDialog = ({
   card,
   members,
   otherBoards,
+  boardCards,
   currentUserId,
   disabled,
   onSave,
   onMoveToBoard,
   onCommentCountChange,
   onChecklistChange,
+  onBlockerCountChange,
   onClose,
 }: CardDialogProps) => {
   const [draft, setDraft] = useState({
@@ -242,6 +247,14 @@ export const CardDialog = ({
             </select>
           </label>
         )}
+
+        <CardDependencies
+          cardId={card.id}
+          boardCards={boardCards}
+          onBlockerCountChange={(count) =>
+            onBlockerCountChange(card.id, count)
+          }
+        />
 
         <CardChecklist
           cardId={card.id}

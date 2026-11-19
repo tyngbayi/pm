@@ -293,6 +293,21 @@ export const KanbanBoard = () => {
       };
     });
 
+  const handleBlockerCountChange = (cardId: string, count: number) =>
+    setBoard((previous) => {
+      const card = previous?.cards[cardId];
+      if (!previous || !card) {
+        return previous;
+      }
+      return {
+        ...previous,
+        cards: {
+          ...previous.cards,
+          [cardId]: { ...card, blockerCount: count },
+        },
+      };
+    });
+
   const handleDeleteCard = (columnId: string, cardId: string) =>
     runMutation(
       () => deleteCard(cardId),
@@ -658,12 +673,14 @@ export const KanbanBoard = () => {
           card={editingCard}
           members={members}
           otherBoards={boards.filter((summary) => summary.id !== activeBoardId)}
+          boardCards={Object.values(board.cards)}
           currentUserId={user.id}
           disabled={isBoardBusy}
           onSave={handleUpdateCard}
           onMoveToBoard={handleMoveCardToBoard}
           onCommentCountChange={handleCommentCountChange}
           onChecklistChange={handleChecklistChange}
+          onBlockerCountChange={handleBlockerCountChange}
           onClose={() => setEditingCardId(null)}
         />
       )}

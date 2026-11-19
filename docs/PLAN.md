@@ -853,3 +853,57 @@ it back as visible; the visible copy wins rather than colliding on the id.
 Restoring is a second call to the same route rather than its own endpoint. It
 is one field with two values, and the board the caller gets back is the same
 shape either way.
+
+## Part 27 - Card dependencies
+
+A board says what the work is and who holds it, but not what has to happen
+first. Order lives in people's heads, so a card that cannot start yet looks
+exactly like one that can.
+
+### Steps
+
+- [x] `card_links` (migration 10): one row per "blocker must be done before
+      blocked", with both ends cascading
+- [x] `GET/POST /api/cards/{id}/links` and `DELETE /api/links/{id}`
+- [x] A derived `blockerCount` on every card, counted like the comment and
+      checklist totals
+- [x] A Dependencies section in the card dialog naming both directions
+- [x] A red "Blocked" badge on a card that is waiting on something
+- [x] Blocking and unblocking are recorded in the board's history
+
+### Success criteria
+
+- [x] A cycle of any length is refused, not just the two-card case
+- [x] A blocker must sit on the same board; moving a card elsewhere lifts its
+      dependencies rather than pointing across the boundary
+- [x] An archived blocker still blocks: parking work does not finish it
+- [x] Dependencies survive a whole-board rewrite, including an AI update
+- [x] Backend 252 tests / 99% coverage, frontend 70 unit tests, 40 Playwright
+      tests, green on a full run
+
+### Decisions
+
+Dependencies are a graph, so the obvious `UNIQUE (blocked_id, blocker_id)` only
+catches the shortest possible cycle. Before every insert the API walks forwards
+from the blocked card with a recursive CTE and refuses the link if the proposed
+blocker is already downstream. `UNION` rather than `UNION ALL`, so a
+diamond-shaped graph is not revisited and the walk terminates.
+
+`card_links` is the first child table that cannot join `_CARD_CHILDREN`, because
+it hangs off two cards rather than one. `replace_board` reads a board's links
+aside separately and reinserts only those whose *both* ends survived, so a
+rewrite that removes one card lifts its dependencies instead of orphaning them.
+
+A link is refused across boards rather than translated. A blocker on another
+board would name a card the reader may not be able to open, and could not
+travel with a move, so `move_card_to_board` deletes the moved card's links in
+both directions. That is a real loss of information, but a dangling reference
+to an unreadable card is worse.
+
+The picker offers only cards that are neither end of an existing dependency nor
+the card itself. Those are exactly what the API refuses, so offering them would
+only produce an error the reader has to read and dismiss.
+
+The card's badge is updated from the dialog's own reply rather than by
+refetching the board, the same `onChange` delta the comment and checklist
+sections already report upwards.

@@ -14,6 +14,21 @@ export type Card = {
   /** Counted from the card's checklist by the API; never sent back. */
   checklistDone: number;
   checklistTotal: number;
+  /** How many cards still have to be done first; counted by the API. */
+  blockerCount: number;
+};
+
+/** One dependency, named from the far side: `card_id` is the other card. */
+export type CardLink = {
+  id: string;
+  card_id: string;
+  title: string;
+  column_title: string;
+};
+
+export type CardLinks = {
+  blocked_by: CardLink[];
+  blocks: CardLink[];
 };
 
 export type ChecklistItem = {

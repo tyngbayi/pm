@@ -40,6 +40,7 @@ src/
     CardDialog.tsx    # Modal for editing one card's fields plus its thread
     CardComments.tsx  # One card's comment thread: list, add, delete own
     CardChecklist.tsx # One card's subtasks: list, add, tick, delete
+    CardDependencies.tsx   # One card's blockers and what it blocks
     BoardFilters.tsx  # Search box plus assignee and label filters
     AiSidebar.tsx     # AI conversation UI and optional board update handling
     MyWorkDialog.tsx  # Cross-board list of the signed-in user's assigned cards
@@ -69,6 +70,7 @@ tests/
   cards.spec.ts       # Card detail editing and board filtering e2e tests
   card-moves.spec.ts  # Moving a card to another board e2e tests
   archive.spec.ts     # Archiving and restoring a card e2e tests
+  dependencies.spec.ts     # Blocking and unblocking a card e2e tests
   sharing.spec.ts     # Board sharing, access, and revocation e2e tests
   comments.spec.ts    # Card comment thread and shared-board discussion e2e tests
   mywork.spec.ts      # Cross-board assigned-card panel e2e tests
@@ -92,8 +94,11 @@ type Card   = {
   commentCount: number     // derived by the API; never sent back
   checklistDone: number    // derived by the API; never sent back
   checklistTotal: number   // derived by the API; never sent back
+  blockerCount: number     // derived by the API; never sent back
 }
 type ChecklistItem = { id: string; body: string; done: boolean }
+type CardLink = { id: string; card_id: string; title: string; column_title: string }
+type CardLinks = { blocked_by: CardLink[]; blocks: CardLink[] }
 type Column = {
   id: string
   title: string
@@ -141,6 +146,7 @@ The backend seeds the initial board; the frontend loads persisted board data fro
 - **Check off a subtask**: the detail dialog carries a `CardChecklist` section between the fields and the thread, with an "N of M done" badge. Anyone who can open the board may add, tick, and delete an item, since the checklist is the card's content rather than one person's. The card shows a done/total badge once the checklist is non-empty; `CardChecklist` reports absolute counts up rather than a delta like `CardComments`, because ticking moves only one of the two numbers. A box stays disabled until its `PATCH` returns, so there is no optimistic state to roll back — which is also why the e2e spec clicks it instead of using Playwright's `check()`.
 - **Move a card to another board**: the detail dialog carries a "Move to board" picker listing the user's other boards, hidden when there are none. It sits outside the dialog's form and acts on selection rather than on "Save card", because the move is persisted on its own. The API answers with the board the card left, so the board on screen is replaced with the response and the dialog closes with the card it was showing.
 - **Archive a card**: an archive icon on each card parks it off the board without deleting it; a header icon opens `ArchiveDialog`, which fetches `GET /api/boards/{id}/archive` on open and lists what is parked with its column and timestamp, newest first. Restoring puts the card back at the foot of the column it left. Both calls answer with the whole board, so the dialog only has to drop the restored row from its own list.
+- **Block a card**: the detail dialog carries a `CardDependencies` section naming both what is blocking the card and what it is blocking, each row linking to the other card's title and column. The picker offers only cards that are neither end of an existing dependency nor the card itself, since those are exactly what the API refuses. A blocked card carries a red "Blocked" badge on the board; the section reports its blocked-by count up so the badge stays in step without refetching.
 - **Filter board**: `BoardFilters` narrows the board by free text (title, details, labels), assignee, and label. `filterBoard` keeps every column on screen so a match stays readable in context, and drag is paused while filtering because card positions are absolute.
 - **Switch board**: `BoardSwitcher` lists the boards a user can open and creates, renames, shares, or deletes them. Deletion is disabled while only one owned board remains.
 - **Share board**: a share icon opens `ShareDialog`, which adds a member by username and removes one by icon. A board owned by someone else is suffixed "(shared)" and hides the rename, share, and delete controls, matching the API, which answers 404 for all three.

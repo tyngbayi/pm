@@ -163,6 +163,23 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE cards ADD COLUMN archived_at TEXT NOT NULL DEFAULT '';
         """,
     ),
+    (
+        10,
+        # One row is "blocker_id must be done before blocked_id". Both ends
+        # cascade, so a deleted card takes its dependencies with it.
+        """
+        CREATE TABLE card_links (
+            id TEXT PRIMARY KEY NOT NULL,
+            blocked_id TEXT NOT NULL
+                       REFERENCES cards (id) ON DELETE CASCADE,
+            blocker_id TEXT NOT NULL
+                       REFERENCES cards (id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT '',
+            UNIQUE (blocked_id, blocker_id)
+        );
+        CREATE INDEX card_links_by_blocker ON card_links (blocker_id);
+        """,
+    ),
 )
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
@@ -241,11 +258,26 @@ class CardRecord(TypedDict):
     dueDate: str
     assigneeId: str | None
     labels: list[str]
-    # Derived from `card_comments` and `card_checklist_items`, so these are
-    # read-only: `replace_board` never writes them back.
+    # Derived from the card's child tables, so these are read-only:
+    # `replace_board` never writes them back.
     commentCount: int
     checklistDone: int
     checklistTotal: int
+    blockerCount: int
+
+
+class CardLinkRecord(TypedDict):
+    """One end of a dependency: the link's own id plus the card on the far side."""
+
+    id: str
+    card_id: str
+    title: str
+    column_title: str
+
+
+class CardLinksRecord(TypedDict):
+    blocked_by: list[CardLinkRecord]
+    blocks: list[CardLinkRecord]
 
 
 class ChecklistItemRecord(TypedDict):
@@ -795,7 +827,9 @@ CARD_FIELDS = (
     "(SELECT COUNT(*) FROM card_checklist_items WHERE card_id = cards.id)"
     " AS checklist_total, "
     "(SELECT COUNT(*) FROM card_checklist_items"
-    " WHERE card_id = cards.id AND done = 1) AS checklist_done"
+    " WHERE card_id = cards.id AND done = 1) AS checklist_done, "
+    "(SELECT COUNT(*) FROM card_links WHERE blocked_id = cards.id)"
+    " AS blocker_count"
 )
 
 # JSON card fields mapped to their database column. `labels` is stored as a
@@ -822,6 +856,7 @@ def _card_data(row: sqlite3.Row) -> CardRecord:
         "commentCount": row["comment_count"],
         "checklistDone": row["checklist_done"],
         "checklistTotal": row["checklist_total"],
+        "blockerCount": row["blocker_count"],
     }
 
 
@@ -914,6 +949,20 @@ def replace_board(
             """,
             (board_id,),
         ).fetchall()
+        # Dependencies hang off two cards rather than one, so they cannot join
+        # `_CARD_CHILDREN`: a link only comes back if both ends survive.
+        links = connection.execute(
+            """
+            SELECT card_links.id, card_links.blocked_id, card_links.blocker_id,
+                   card_links.created_at
+            FROM card_links
+            JOIN cards ON cards.id = card_links.blocked_id
+            JOIN columns ON columns.id = cards.column_id
+            WHERE columns.board_id = ?
+            ORDER BY card_links.rowid
+            """,
+            (board_id,),
+        ).fetchall()
         connection.execute("DELETE FROM columns WHERE board_id = ?", (board_id,))
         columns = board_data["columns"]
         cards = board_data["cards"]
@@ -995,6 +1044,19 @@ def replace_board(
                     if row["card_id"] in cards or row["card_id"] in restored
                 ],
             )
+        survivors = cards.keys() | restored
+        connection.executemany(
+            """
+            INSERT INTO card_links (id, blocked_id, blocker_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                tuple(link)
+                for link in links
+                if link["blocked_id"] in survivors
+                and link["blocker_id"] in survivors
+            ],
+        )
         _record(connection, board_id, user_id, "Rewrote the whole board")
         return _board_data(connection, board_id)
 
@@ -1190,20 +1252,26 @@ def create_card(
         return _card_data(row)
 
 
+def _card_board_id(
+    connection: sqlite3.Connection, user_id: str, card_id: str
+) -> str | None:
+    row = connection.execute(
+        f"""
+        SELECT columns.board_id
+        FROM cards
+        JOIN columns ON columns.id = cards.column_id
+        WHERE cards.id = ?
+          AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
+        """,
+        (card_id, user_id, user_id),
+    ).fetchone()
+    return None if row is None else row["board_id"]
+
+
 def card_board_id(database_path: Path, user_id: str, card_id: str) -> str | None:
     """The board a card sits on, or None when the user cannot reach it."""
     with _connection(database_path) as connection:
-        row = connection.execute(
-            f"""
-            SELECT columns.board_id
-            FROM cards
-            JOIN columns ON columns.id = cards.column_id
-            WHERE cards.id = ?
-              AND columns.board_id IN ({ACCESSIBLE_BOARD_IDS})
-            """,
-            (card_id, user_id, user_id),
-        ).fetchone()
-        return None if row is None else row["board_id"]
+        return _card_board_id(connection, user_id, card_id)
 
 
 def update_card(
@@ -1474,6 +1542,13 @@ def move_card_to_board(
             WHERE id = ?
             """,
             (destination["id"], position, assignee, card_id),
+        )
+        # Dependencies are a statement about one board's work, so they stay
+        # behind rather than pointing across the boundary at a card the
+        # destination's readers may not be able to open.
+        connection.execute(
+            "DELETE FROM card_links WHERE blocked_id = ? OR blocker_id = ?",
+            (card_id, card_id),
         )
         source_board_id = card["board_id"]
         _reseat_column(connection, card["column_id"])
@@ -1751,6 +1826,160 @@ def delete_checklist_item(
             WHERE id = ? AND card_id IN ({_REACHABLE_CARD})
             """,
             (item_id, user_id, user_id),
+        )
+        return cursor.rowcount == 1
+
+
+def _link_data(row: sqlite3.Row) -> CardLinkRecord:
+    return {
+        "id": row["id"],
+        "card_id": row["card_id"],
+        "title": row["title"],
+        "column_title": row["column_title"],
+    }
+
+
+_LINK_FIELDS = """
+    card_links.id, cards.id AS card_id, cards.title,
+    columns.title AS column_title
+"""
+
+
+def _links(
+    connection: sqlite3.Connection, card_id: str
+) -> CardLinksRecord:
+    """Both directions of a card's dependencies, each naming the other card."""
+    sides = {}
+    for side, own, other in (
+        ("blocked_by", "blocked_id", "blocker_id"),
+        ("blocks", "blocker_id", "blocked_id"),
+    ):
+        sides[side] = [
+            _link_data(row)
+            for row in connection.execute(
+                f"""
+                SELECT {_LINK_FIELDS}
+                FROM card_links
+                JOIN cards ON cards.id = card_links.{other}
+                JOIN columns ON columns.id = cards.column_id
+                WHERE card_links.{own} = ?
+                ORDER BY card_links.rowid
+                """,
+                (card_id,),
+            )
+        ]
+    return {"blocked_by": sides["blocked_by"], "blocks": sides["blocks"]}
+
+
+def list_card_links(
+    database_path: Path, user_id: str, card_id: str
+) -> CardLinksRecord | None:
+    with _connection(database_path) as connection:
+        if not _card_is_reachable(connection, user_id, card_id):
+            return None
+        return _links(connection, card_id)
+
+
+def _blocks_transitively(
+    connection: sqlite3.Connection, card_id: str, other_id: str
+) -> bool:
+    """Whether `card_id` already has to be done before `other_id`.
+
+    Walking the chain forwards is what catches a cycle of any length, not just
+    the two-card case a UNIQUE constraint would. UNION rather than UNION ALL so
+    a diamond-shaped graph is not revisited and the walk terminates.
+    """
+    return (
+        connection.execute(
+            """
+            WITH RECURSIVE downstream(id) AS (
+                SELECT ?
+                UNION
+                SELECT card_links.blocked_id
+                FROM card_links
+                JOIN downstream ON downstream.id = card_links.blocker_id
+            )
+            SELECT 1 FROM downstream WHERE id = ?
+            """,
+            (card_id, other_id),
+        ).fetchone()
+        is not None
+    )
+
+
+class LinkRefusal(TypedDict):
+    status: int
+    detail: str
+
+
+def create_card_link(
+    database_path: Path, user_id: str, card_id: str, blocker_id: str
+) -> CardLinkRecord | LinkRefusal:
+    """Record that `blocker_id` has to be done before `card_id`."""
+    with _connection(database_path) as connection:
+        board_id = _card_board_id(connection, user_id, card_id)
+        if board_id is None:
+            return {"status": 404, "detail": "Card not found"}
+        if _card_board_id(connection, user_id, blocker_id) != board_id:
+            # A blocker on another board would show the reader a card they may
+            # not be able to open, and could not travel with a move.
+            return {
+                "status": 404,
+                "detail": "That card is not on this board",
+            }
+        if blocker_id == card_id:
+            return {"status": 422, "detail": "A card cannot block itself"}
+        if _blocks_transitively(connection, card_id, blocker_id):
+            return {
+                "status": 422,
+                "detail": "That would make the dependency circular",
+            }
+        if connection.execute(
+            "SELECT 1 FROM card_links WHERE blocked_id = ? AND blocker_id = ?",
+            (card_id, blocker_id),
+        ).fetchone():
+            return {"status": 409, "detail": "That card is already blocking it"}
+        link_id = _new_id("link")
+        connection.execute(
+            """
+            INSERT INTO card_links (id, blocked_id, blocker_id, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (link_id, card_id, blocker_id, _now()),
+        )
+        blocked, blocker = (
+            connection.execute(
+                "SELECT title FROM cards WHERE id = ?", (identifier,)
+            ).fetchone()["title"]
+            for identifier in (card_id, blocker_id)
+        )
+        _record(
+            connection,
+            board_id,
+            user_id,
+            f'Blocked card "{blocked}" on "{blocker}"',
+        )
+        row = connection.execute(
+            f"""
+            SELECT {_LINK_FIELDS}
+            FROM card_links
+            JOIN cards ON cards.id = card_links.blocker_id
+            JOIN columns ON columns.id = cards.column_id
+            WHERE card_links.id = ?
+            """,
+            (link_id,),
+        ).fetchone()
+        return _link_data(row)
+
+
+def delete_card_link(database_path: Path, user_id: str, link_id: str) -> bool:
+    with _connection(database_path) as connection:
+        cursor = connection.execute(
+            f"""
+            DELETE FROM card_links
+            WHERE id = ? AND blocked_id IN ({_REACHABLE_CARD})
+            """,
+            (link_id, user_id, user_id),
         )
         return cursor.rowcount == 1
 

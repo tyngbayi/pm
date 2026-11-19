@@ -199,6 +199,20 @@ tail, or every `PUT`, and so every AI board update, would erase it. A stale clie
 that still shows a card archived since sends it back as visible; the visible copy
 wins rather than colliding on the primary key.
 
+**Dependencies.** `card_links` records "blocker must be done before blocked",
+served by `GET/POST /api/cards/{id}/links` and `DELETE /api/links/{id}`, with a
+derived `blockerCount` counted in `CARD_FIELDS` like the comment and checklist
+totals. `UNIQUE (blocked_id, blocker_id)` only catches the two-card cycle, so
+`_blocks_transitively` walks forwards from the blocked card with a recursive CTE
+(`UNION`, not `UNION ALL`, so a diamond graph terminates) and the insert is
+refused with a 422 if the proposed blocker is already downstream. Both cards must
+sit on the same board, and `move_card_to_board` deletes the moved card's links in
+both directions rather than leaving one pointing at a card the destination's
+readers cannot open. An archived blocker still blocks. This is the one child table
+that cannot join `_CARD_CHILDREN` — it hangs off two cards, not one — so
+`replace_board` reads the board's links aside separately and reinserts only those
+whose *both* ends survived the rewrite.
+
 **Comments.** `GET/POST /api/cards/{id}/comments` and `DELETE /api/comments/{id}`.
 Anyone who can open the card's board may read and add; only the author may delete,
 and the refusal is a 404 so it does not confirm someone else's comment exists.
@@ -261,6 +275,10 @@ selection: the move is already persisted, so folding it into "Save card" would
 make one button do two unrelated writes. The picker is hidden when the user has
 only one board. `CardComments.tsx` owns its own requests and reports a `+1`/`-1`
 delta up, so the card's badge stays in step without refetching the board.
+`CardDependencies.tsx` loads both directions of a card's links and reports the
+blocked-by count up, like the two sections above it; its picker offers only cards
+that are neither end of an existing dependency nor the card itself, which is
+exactly the set the API would refuse.
 `ArchiveDialog.tsx` fetches the archive on open and drops a row locally once its
 restore resolves — the board behind it is replaced by the same response, so there
 is nothing else to reconcile.

@@ -45,6 +45,7 @@ describe("filterBoard", () => {
     commentCount: 0,
     checklistDone: 0,
     checklistTotal: 0,
+  blockerCount: 0,
     ...extra,
   });
 

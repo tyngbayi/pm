@@ -32,6 +32,11 @@ the foot of the column it left, answering with the reshaped board, and
 card keeps everything hanging off it and is simply absent from every board
 response; `replace_board` preserves it across a whole-board rewrite, so an AI
 update cannot erase the archive.
+`GET/POST /api/cards/{id}/links` and `DELETE /api/links/{id}` manage a card's
+dependencies, which both cards' boards must agree on: a blocker on another
+board is a 404, a self-block or a link that would close a cycle of any length
+is a 422, and a repeat is a 409. Moving a card to another board lifts its
+dependencies rather than pointing across the boundary.
 `GET /api/assignments` gathers every card assigned to the
 signed-in user across all the boards they can open, with the board name and
 column title on each, soonest due first and undated cards last. Every board
