@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { BoardData } from "../src/lib/kanban";
+import { deleteUser, signUp, uniqueUsername } from "./helpers";
 
 const signIn = async (page: Page) => {
   await page.goto("/login");
@@ -42,27 +43,31 @@ const firstBoardId = async (page: Page) => {
   return ((await response.json()) as { id: string }[])[0].id;
 };
 
+/**
+ * Each test gets its own account, so it reshapes a freshly seeded board that
+ * no parallel worker shares. Restoring one shared board with a PUT instead
+ * loses whichever worker snapshotted first, which drifts the demo board.
+ */
 test.describe("authenticated board", () => {
-  let originalBoard: BoardData | null = null;
+  const created: string[] = [];
   let boardUrl = "";
 
   test.beforeEach(async ({ page }) => {
-    originalBoard = null;
-    await signIn(page);
+    const username = uniqueUsername();
+    created.push(username);
+    await signUp(page, username, `Board ${username}`);
+    await expect(
+      page.getByRole("heading", { name: "Kanban Studio" })
+    ).toBeVisible();
     boardUrl = `/api/boards/${await firstBoardId(page)}`;
-    const response = await page.request.get(boardUrl);
-    expect(response.ok()).toBeTruthy();
-    originalBoard = (await response.json()) as BoardData;
   });
 
-  test.afterEach(async ({ page }) => {
-    if (originalBoard) {
-      const response = await page.request.put(boardUrl, {
-        data: originalBoard,
-      });
-      expect(response.ok()).toBeTruthy();
-      originalBoard = null;
+  test.afterEach(async ({ playwright, baseURL }) => {
+    const request = await playwright.request.newContext({ baseURL });
+    for (const username of created.splice(0)) {
+      await deleteUser(request, username);
     }
+    await request.dispose();
   });
 
   test("loads the kanban board", async ({ page }) => {

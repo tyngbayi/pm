@@ -10,6 +10,7 @@ Tests should protect implemented behavior and catch regressions without adding u
 - API contract changes should test successful behavior and relevant failure cases.
 - Use unit tests for isolated logic and components, integration tests for interactions between the API and persistence layer, and Playwright for important browser flows. Add each layer as the corresponding feature is implemented.
 - Coverage reports are informative, not a pass/fail target. There is no minimum coverage percentage or CI coverage gate.
+- A Playwright spec that reshapes a board signs up its own account and uses that board's fresh seed. Specs run in parallel against one persistent volume, so snapshotting the shared demo board and restoring it afterwards loses a concurrent writer and drifts the seed for every later run.
 - There is currently no CI workflow configured; do not describe tests or coverage as CI-enforced until one is added.
 
 ### Running the current tests

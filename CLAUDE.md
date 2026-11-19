@@ -329,6 +329,13 @@ an account by display name must use a unique one: a shared name lets
 `selectOption` pick a parallel spec's account, which its cleanup then deletes
 mid-request.
 
+A spec that *reshapes* a board must sign up its own account and work on that
+board's fresh seed rather than snapshotting the demo board and restoring it with
+a `PUT`. Two workers that snapshot the one shared board before either restores it
+lose the first writer, which permanently drifts the seed: renamed columns and
+redistributed cards survive the run and then break any test that reads the layout
+by position, such as the coordinate-driven drag in `tests/kanban.spec.ts`.
+
 Three selectors are ambiguous in the browser and need naming around: `getByRole
 ("status")` also matches dnd-kit's live region, `getByRole("alert")` also matches
 Next's route announcer (assert the message text instead), and `getByLabel("Board")`
